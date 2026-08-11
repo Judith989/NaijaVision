@@ -1,0 +1,29 @@
+project_id = "naijavision"
+
+[api]
+enabled = true
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000"]
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+enable_confirmations = true
+
+[storage]
+enabled = true
+file_size_limit = "100MiB"
+
+[functions.tokenize-payout-account]
+verify_jwt = true
+
+[functions.process-payment]
+verify_jwt = true
+
+[functions.dispatch-quality-control]
+verify_jwt = true
