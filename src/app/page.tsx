@@ -28,6 +28,8 @@ const deviceTypes = ["Smartphone", "Tablet", "Laptop", "Desktop", "External Came
 const operatingSystems = ["Android", "iOS", "Windows", "macOS", "Linux", "Other"];
 const taskOptions = ["Reading prompted sentences", "Free speech", "Picture description", "Conversation", "Storytelling", "Emotion expression", "Sign-supported speech", "Lip movement recording", "Harmful speech annotation", "Translation", "Code-switching tasks"];
 const accessibilityOptions = ["Screen reader", "Voice control", "Hearing aid", "Captioning", "None", "Other"];
+const REGULAR_COMPENSATION = { amount: 4000, currency: "NGN" };
+const FULL_COMPENSATION = { amount: 5000, currency: "NGN" };
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -278,6 +280,7 @@ export default function Home() {
   const consentReady = Object.values(consent).every(Boolean);
   const acceptedCount = clips.filter((c) => c.status === "accepted").length;
   const progress = Math.min(100, (acceptedCount / prompts.length) * 100);
+  const estimatedCompensation = compensation ?? (harmful ? FULL_COMPENSATION : REGULAR_COMPENSATION);
 
   function saveDraftAndExit() {
     localStorage.setItem("naijavision-contribution-draft", JSON.stringify({
@@ -991,7 +994,10 @@ export default function Home() {
             <h3>Privacy limitation</h3><blockquote>The collection method reduces identity exposure by excluding most of the face, while acknowledging that audio and mouth-region video remain potentially identifiable biometric data.</blockquote>
             <h3>Public release and research use</h3><p>Accepted research recordings and approved participant metadata are intended for public dataset release and AI research.</p>
             <h3>Review and compensation</h3><p>Submission does not guarantee approval. A trained reviewer checks prompt accuracy, audio and video quality, privacy, duplication, and policy compliance. Payment becomes eligible only after approval under the published compensation policy.</p>
-            <div className="compensation-callout"><small>Full approved submission</small><b>{compensation ? `${compensation.amount} ${compensation.currency}` : "Compensation amount will be shown before production participation"}</b></div>
+            <div className="compensation-callout">
+              <div><small>Regular participation</small><b>{compensation ? `${compensation.amount} ${compensation.currency}` : `${REGULAR_COMPENSATION.amount} ${REGULAR_COMPENSATION.currency}`}</b></div>
+              <div><small>With NaijaSafeSpeech</small><b>{compensation ? `${compensation.amount} ${compensation.currency}` : `${FULL_COMPENSATION.amount} ${FULL_COMPENSATION.currency}`}</b></div>
+            </div>
             <h3>Your choice and rights</h3><p>Participation is voluntary. You may skip optional questions, redo recordings, stop before submission, and request access, correction, or withdrawal where applicable. NaijaVSR participation does not require NaijaSafeSpeech participation.</p>
           </article>
           <div className="footer-actions"><button className="secondary" onClick={() => setStep("account")}>Back</button><button className="primary" onClick={() => setStep("consent")}>I have read the study information <span>→</span></button></div>
@@ -1145,7 +1151,7 @@ export default function Home() {
 
             <div className="eyebrow" style={{ marginTop: 22 }}>Your session</div><h3>{acceptedCount} of {prompts.length} saved</h3>
             <div className="progress"><i style={{ width: `${progress}%` }} /></div>
-            <div className="earnings-row"><small>Estimated compensation</small><b>{compensation ? `${compensation.amount} ${compensation.currency}` : "Shown after approval"}</b></div>
+            <div className="earnings-row"><small>Estimated compensation</small><b>{estimatedCompensation.amount} {estimatedCompensation.currency}</b></div>
 
             <div className="prompt-list">{prompts.map((p, i) => <div key={p.id} className={`${i === promptIndex ? "current" : ""} ${clips.some((c) => c.promptId === p.id) ? "done" : ""}`}><span>{clips.some((c) => c.promptId === p.id) ? "✓" : i + 1}</span><div><b>{p.type}</b><small>{p.language}</small></div></div>)}</div>
             <button className="secondary full" disabled={!clips.length} onClick={() => setStep("review")}>Review recordings ({clips.length})</button>
@@ -1197,7 +1203,7 @@ export default function Home() {
           <div className="review-summary">
             <div><small>Completed</small><b>{clips.length} of {prompts.length}</b></div>
             <div><small>Still required</small><b>{Math.max(0, prompts.length - clips.length)}</b></div>
-            <div><small>Compensation after approval</small><b>{compensation ? `${compensation.amount} ${compensation.currency}` : "Study rate"}</b></div>
+            <div><small>Compensation after approval</small><b>{estimatedCompensation.amount} {estimatedCompensation.currency}</b></div>
             <div><small>Payment destination</small><b>{account.bankName ? `${account.bankName} ···· ${account.accountNumber.slice(-4)}` : "Saved payment account"}</b></div>
           </div>
           <div className="notice"><Mark>i</Mark><p><b>Payment follows approval.</b> Submit only after checking the recordings. A reviewer validates the files first, then an administrator processes compensation to the payment destination shown above.</p></div>
