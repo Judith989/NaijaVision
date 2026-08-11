@@ -157,10 +157,6 @@ export default function Home() {
   const chunksRef = useRef<Blob[]>([]);
   const startedRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const manualOffsetRef = useRef({ x: 0, y: 0 });
-  const [manualOffset, setManualOffset] = useState({ x: 0, y: 0 });
-  const draggingOffsetRef = useRef(false);
-  const dragOriginRef = useRef({ x: 0, y: 0 });
 
   useEffect(() => { loadClips().then((items) => setClips(items.filter((clip) => clip.metadata?.sessionId === profile.code))).catch(() => undefined); }, [profile.code]);
   useEffect(() => { fetch(`${BASE_PATH}/nigeria-lgas.json`).then((response) => response.json()).then(setLgas).catch(() => setLgas({})); }, []);
@@ -579,8 +575,6 @@ export default function Home() {
   async function enableDevices() {
     setCameraError("");
     setCalibrationMessage("Requesting camera and microphone access...");
-    manualOffsetRef.current = { x: 0, y: 0 };
-    setManualOffset({ x: 0, y: 0 });
     try {
       const media = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 }, facingMode: "user" },
@@ -623,25 +617,6 @@ export default function Home() {
     setCameraPassed(false);
     setAudioPassed(false);
     setCalibrating(false);
-  }
-
-  function handleOffsetPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    draggingOffsetRef.current = true;
-    dragOriginRef.current = { x: e.clientX - manualOffsetRef.current.x, y: e.clientY - manualOffsetRef.current.y };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-
-  function handleOffsetPointerMove(e: React.PointerEvent<HTMLDivElement>) {
-    if (!draggingOffsetRef.current) return;
-    const nextX = Math.max(-60, Math.min(60, e.clientX - dragOriginRef.current.x));
-    const nextY = Math.max(-60, Math.min(60, e.clientY - dragOriginRef.current.y));
-    manualOffsetRef.current = { x: nextX, y: nextY };
-    setManualOffset({ x: nextX, y: nextY });
-  }
-
-  function handleOffsetPointerUp(e: React.PointerEvent<HTMLDivElement>) {
-    draggingOffsetRef.current = false;
-    e.currentTarget.releasePointerCapture(e.pointerId);
   }
 
   async function runCalibration() {
@@ -687,10 +662,8 @@ export default function Home() {
         const maxY = Math.max(...points.map((point) => point.y));
         const lipWidth = (maxX - minX) * video.videoWidth;
         const lipHeight = (maxY - minY) * video.videoHeight;
-        // The preview canvas is mirrored (selfie view), so a rightward drag on it
-        // must shift the source crop left to move the crop the way it visually looks.
-        const centerX = ((minX + maxX) / 2) * video.videoWidth - manualOffsetRef.current.x;
-        const centerY = ((minY + maxY) / 2) * video.videoHeight + manualOffsetRef.current.y;
+        const centerX = ((minX + maxX) / 2) * video.videoWidth;
+        const centerY = ((minY + maxY) / 2) * video.videoHeight;
         const cropWidth = Math.max(160, lipWidth * 1.75);
         const cropHeight = Math.max(90, lipHeight * 2.15);
         const sourceX = centerX - cropWidth / 2;
@@ -762,7 +735,7 @@ export default function Home() {
       const audioTrack = stream.getAudioTracks()[0];
       const sampleRate = audioTrack?.getSettings().sampleRate || audioContextRef.current?.sampleRate || 0;
       const clipping = totalSamples ? clippedSamples / totalSamples : 1;
-      const audioOk = Boolean(audioTrack && audioTrack.enabled && audioTrack.readyState === "live" && sampleRate >= 8000);
+      const audioOk = Boolean(audioTrack && audioTrack.enabled && audioTrack.readyState === "live" && sampleRate >= 8000 && speechFrames > 0);
       const lightOk = lightStableFramesRef.current >= 25;
       setCameraPassed(faceOk);
       setAudioPassed(audioOk);
@@ -783,7 +756,7 @@ export default function Home() {
           processedStreamRef.current = combined;
           calibrationFrameRef.current = requestAnimationFrame(analyze);
         } else if (!audioOk) {
-          setCalibrationMessage("Microphone access failed. Check browser permission and confirm that a microphone is connected.");
+          setCalibrationMessage("No audible speech detected. Check that a microphone is connected and read the test phrase aloud.");
         } else if (!lightOk) {
           setCalibrationMessage("Lighting test failed. Add soft front lighting or move away from harsh direct light.");
         } else if (!faceOk) {
@@ -833,7 +806,7 @@ export default function Home() {
       language: current.language,
       duration: preview.duration,
       createdAt: new Date().toISOString(),
-      status: preview.duration >= 2 && preview.duration <= (current.responseSeconds ? 75 : 20) ? "accepted" : "needs-review",
+      status: preview.duration >= 2 && preview.duration <= (current.responseSeconds || 20) ? "accepted" : "needs-review",
       metadata: {
         sessionId: profile.code,
         timestamp: new Date().toISOString(),
@@ -1100,18 +1073,6 @@ export default function Home() {
               <div className="video-stage">
                 {stream ? <canvas ref={mouthPreviewRef} width="512" height="256" className="mouth-only-preview" /> : <div className="camera-placeholder"><Mark>◉</Mark><b>Camera preview is off</b><small>Both camera and microphone access are required.</small></div>}
                 {stream && !cameraPassed && <div className="crop-placeholder"><b>Mouth-only preview</b><small>Your eyes, nose, and full face are not shown or recorded.</small></div>}
-                {stream && (
-                  <div
-                    className="mouth-guide"
-                    style={{ transform: `translate(calc(-50% + ${manualOffset.x}px), calc(-50% + ${manualOffset.y}px))`, touchAction: "none" }}
-                    onPointerDown={handleOffsetPointerDown}
-                    onPointerMove={handleOffsetPointerMove}
-                    onPointerUp={handleOffsetPointerUp}
-                    onPointerCancel={handleOffsetPointerUp}
-                  >
-                    <span>Drag to fine-tune alignment</span>
-                  </div>
-                )}
               </div>
               {!stream && <button className="primary full" onClick={enableDevices}>Enable camera & microphone</button>}
               {stream && <button className="primary full" disabled={calibrating || !faceLandmarkerRef.current} onClick={runCalibration}>{calibrating ? "Testing for 7 seconds..." : cameraPassed && audioPassed && lightingPassed ? "Run calibration again" : "Run all required checks"}</button>}
@@ -1167,8 +1128,13 @@ export default function Home() {
           </aside>
           <div className="record-workspace">
             <div className="prompt-header"><span className="prompt-chip">{current.type}</span><span>{current.id}</span><span className="lang-chip">{current.language}</span></div>
-            <div className="prompt-card"><small>{current.type === "Natural speech" ? `Answer naturally for up to ${current.responseSeconds} seconds` : current.type === "NaijaSafeSpeech" ? "Performed research prompt · optional subset" : "Read this naturally"}</small><h2>{current.text}</h2>{current.translation && <p>{current.translation}</p>}</div>
-            <div className="recorder-grid">
+            <div className="record-split">
+              <div className="script-panel">
+                <small>{current.type === "Natural speech" ? `Answer naturally for up to ${current.responseSeconds} seconds` : current.type === "NaijaSafeSpeech" ? "Performed research prompt · optional subset" : "Read this naturally"}</small>
+                <div className="script-text">{current.text}</div>
+                {current.translation && <p className="script-translation">{current.translation}</p>}
+              </div>
+              <div className="recorder-grid">
               <div className="record-video">
                 {preview ? <video src={preview.url} controls playsInline /> : <canvas ref={mouthPreviewRef} width="512" height="256" className="mouth-only-preview" />}
                 {!preview && <div className="mouth-only-label">Mouth-only recording stream</div>}
@@ -1185,6 +1151,7 @@ export default function Home() {
                   <button className="skip" onClick={() => setPromptIndex((promptIndex + 1) % prompts.length)}>Skip this prompt</button>
                   {clips.length > 0 && <button className="skip review-shortcut" onClick={() => setStep("review")}>Review {clips.length} completed recording{clips.length === 1 ? "" : "s"}</button>}
                 </>}
+              </div>
               </div>
             </div>
           </div>
