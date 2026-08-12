@@ -881,7 +881,7 @@ export default function Home() {
         </button>
         <div className="top-context"><span className="privacy-dot" /> {navLabel}</div>
         {(currentRole === "reviewer" || currentRole === "admin" || !backendConfigured) && <button className="admin-link" onClick={() => setStep(step === "reviewer" ? "welcome" : "reviewer")}>{step === "reviewer" ? "Participant site" : "Reviewer workspace"}</button>}
-        {backendConfigured && currentRole === "participant" && <Link className="admin-link" href="/signin">Staff sign in</Link>}
+        {currentRole === "participant" && <Link className="admin-link" href="/signin">Staff sign in</Link>}
         {backendConfigured && (currentRole === "reviewer" || currentRole === "admin") && <button className="admin-link" onClick={handleStaffSignOut}>Sign out</button>}
       </header>
 
