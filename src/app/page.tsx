@@ -886,7 +886,10 @@ export default function Home() {
             {backendConfigured && <button className="admin-link" onClick={handleStaffSignOut}>Sign out</button>}
           </>
         ) : (
-          <Link className="admin-link" href="/signin">Sign in</Link>
+          <div className="nav-auth-links">
+            <Link className="admin-link" href="/signin">Sign in</Link>
+            <Link className="admin-link" href="/signup">Sign up</Link>
+          </div>
         )}
       </header>
 
