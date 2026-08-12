@@ -975,6 +975,7 @@ export default function Home() {
           <article className="study-document">
             <h3>What this study is for</h3><p>NaijaVision collects synchronized speech and mouth-region video for Nigerian English, Nigerian Pidgin, Hausa, Igbo, Yorùbá, multilingual code-switching, accessibility research, and related language technologies.</p>
             <h3>What you will do</h3><p>Complete a language survey, pass microphone, camera, and lighting checks, read prompted sentences, answer four questions naturally, optionally perform NaijaSafeSpeech prompts, review your recordings, and submit them for human validation.</p>
+            <h3>What is NaijaSafeSpeech?</h3><p>NaijaSafeSpeech is a separate, clearly-marked, and entirely optional set of prompts. You read scripted example sentences containing discriminatory or hateful language, written by the research team for this study — not your own words or opinions. These recordings are used only to help train AI systems to recognize and moderate hate speech in Nigerian languages. They are tagged separately from the rest of the dataset, and you are never required to participate in this part to take part in NaijaVSR.</p>
             <h3>What we collect</h3><p>Audio, mouth-region video, transcripts, language and demographic responses, device and environment metadata, calibration results, recording quality information, consent status, and a non-identifying participant ID.</p>
             <h3>Privacy limitation</h3><blockquote>The collection method reduces identity exposure by excluding most of the face, while acknowledging that audio and mouth-region video remain potentially identifiable biometric data.</blockquote>
             <h3>Public release and research use</h3><p>Accepted research recordings and approved participant metadata are intended for public dataset release and AI research.</p>
@@ -1006,7 +1007,7 @@ export default function Home() {
             ))}
           </div>
           <label className="optional-card">
-            <div><b>Optional: NaijaSafeSpeech</b><small>Includes six separately identified performed hate-speech prompts. You may contribute to NaijaVSR without selecting this option.</small></div>
+            <div><b>Optional: NaijaSafeSpeech</b><small>A separately identified set of performed hate-speech prompts — scripted examples, not your own words, used to train hate-speech detection. You may contribute to NaijaVSR without selecting this option.</small></div>
             <input type="checkbox" checked={harmful} onChange={(e) => setHarmful(e.target.checked)} /><span className="switch" />
           </label>
           <div className="footer-actions"><button className="secondary" onClick={() => setStep("study")}>Back</button><button className="primary" disabled={!consentReady} onClick={() => setStep("profile")}>Provide consent and continue <span>→</span></button></div>
