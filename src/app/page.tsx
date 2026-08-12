@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 import { corePrompts, safeSpeechPrompts } from "./prompts";
 import { backendConfigured, getCurrentRole, getSupabase } from "./lib/supabase";
@@ -356,6 +357,15 @@ export default function Home() {
     setAuthenticatedUserId(data.user.id);
     setAuthVerified(true);
     setAuthMessage("Contact verified.");
+  }
+
+  async function handleStaffSignOut() {
+    const supabase = getSupabase();
+    if (supabase) await supabase.auth.signOut();
+    setCurrentRole("participant");
+    setAuthenticatedUserId("");
+    setAuthVerified(false);
+    setStep("welcome");
   }
 
   async function savePayoutAndContinue() {
@@ -871,6 +881,8 @@ export default function Home() {
         </button>
         <div className="top-context"><span className="privacy-dot" /> {navLabel}</div>
         {(currentRole === "reviewer" || currentRole === "admin" || !backendConfigured) && <button className="admin-link" onClick={() => setStep(step === "reviewer" ? "welcome" : "reviewer")}>{step === "reviewer" ? "Participant site" : "Reviewer workspace"}</button>}
+        {backendConfigured && currentRole === "participant" && <Link className="admin-link" href="/signin">Staff sign in</Link>}
+        {backendConfigured && (currentRole === "reviewer" || currentRole === "admin") && <button className="admin-link" onClick={handleStaffSignOut}>Sign out</button>}
       </header>
 
       {step !== "welcome" && step !== "reviewer" && (
