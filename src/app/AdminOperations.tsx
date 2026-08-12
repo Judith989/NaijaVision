@@ -18,6 +18,8 @@ export function AdminOperations() {
   const [releaseName, setReleaseName] = useState("NaijaVSR");
   const [releaseVersion, setReleaseVersion] = useState("");
   const [staffRequests, setStaffRequests] = useState<Row[]>([]);
+  const [participantQuery, setParticipantQuery] = useState("");
+  const [participants, setParticipants] = useState<Row[]>([]);
   const [message, setMessage] = useState("");
 
   async function refresh() {
@@ -39,7 +41,24 @@ export function AdminOperations() {
     setStaffRequests(staffRequestResult.data || []);
   }
 
-  useEffect(() => { refresh(); }, []);
+  async function searchParticipants() {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    let query = supabase.from("profiles").select("user_id,display_name,participant_id,created_at").eq("role", "participant").order("created_at", { ascending: false }).limit(25);
+    const term = participantQuery.trim();
+    if (term) query = query.or(`display_name.ilike.%${term}%,participant_id.ilike.%${term}%`);
+    const { data } = await query;
+    setParticipants(data || []);
+  }
+
+  async function promoteParticipant(id: string, newRole: "reviewer" | "admin") {
+    const supabase = getSupabase();
+    const { error } = await supabase!.rpc("assign_role", { p_user_id: id, p_role: newRole });
+    setMessage(error ? error.message : `Promoted to ${newRole}.`);
+    searchParticipants();
+  }
+
+  useEffect(() => { refresh(); searchParticipants(); }, []);
   if (!backendConfigured) return <div className="notice"><p>Connect Supabase to activate administrative operations.</p></div>;
 
   async function assignRole() {
@@ -116,6 +135,7 @@ export function AdminOperations() {
     {message && <p className="auth-message">{message}</p>}
     <div className="ops-grid">
       <div className="ops-card"><h3>Pending staff requests</h3>{staffRequests.length ? staffRequests.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} · {String(row.participant_id)}</span><button onClick={() => approveStaffRequest(String(row.user_id), "reviewer")}>Make reviewer</button><button onClick={() => approveStaffRequest(String(row.user_id), "admin")}>Make admin</button><button onClick={() => dismissStaffRequest(String(row.user_id))}>Dismiss</button></div>) : <p>No pending requests.</p>}</div>
+      <div className="ops-card"><h3>Recruit a participant</h3><p className="ops-hint">Promote an existing contributor to reviewer or admin.</p><input value={participantQuery} onChange={(event) => setParticipantQuery(event.target.value)} placeholder="Search by name or participant ID" /><button className="primary" onClick={searchParticipants}>Search</button>{participants.length ? participants.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} · {String(row.participant_id)}</span><button onClick={() => promoteParticipant(String(row.user_id), "reviewer")}>Make reviewer</button><button onClick={() => promoteParticipant(String(row.user_id), "admin")}>Make admin</button></div>) : <p>No participants found.</p>}</div>
       <div className="ops-card"><h3>Assign role</h3><input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="Supabase user UUID" /><select value={role} onChange={(event) => setRole(event.target.value)}><option>reviewer</option><option>admin</option><option>participant</option></select><button className="primary" onClick={assignRole}>Assign role</button></div>
       <div className="ops-card"><h3>Compensation policy</h3><input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Full-session amount" /><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option>NGN</option><option>GHS</option><option>USD</option><option>GBP</option><option>EUR</option></select><button className="primary" onClick={createPolicy}>Create policy</button></div>
       <div className="ops-card"><h3>Dataset release</h3><input value={releaseName} onChange={(event) => setReleaseName(event.target.value)} placeholder="Dataset name" /><input value={releaseVersion} onChange={(event) => setReleaseVersion(event.target.value)} placeholder="Version, e.g. 1.0" /><button className="primary" disabled={!releaseVersion} onClick={createRelease}>Create release draft</button></div>
