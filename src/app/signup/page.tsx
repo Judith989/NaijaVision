@@ -33,7 +33,7 @@ export default function SignUpPage() {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { full_name: fullName || undefined } },
+      options: { data: { full_name: fullName || undefined, requesting_staff_access: true } },
     });
     setLoading(false);
     if (error) {
