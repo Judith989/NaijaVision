@@ -880,9 +880,14 @@ export default function Home() {
           <span>Naija<span>Vision</span></span>
         </button>
         <div className="top-context"><span className="privacy-dot" /> {navLabel}</div>
-        {(currentRole === "reviewer" || currentRole === "admin" || !backendConfigured) && <button className="admin-link" onClick={() => setStep(step === "reviewer" ? "welcome" : "reviewer")}>{step === "reviewer" ? "Participant site" : "Reviewer workspace"}</button>}
-        {currentRole === "participant" && <Link className="admin-link" href="/signin">Staff sign in</Link>}
-        {backendConfigured && (currentRole === "reviewer" || currentRole === "admin") && <button className="admin-link" onClick={handleStaffSignOut}>Sign out</button>}
+        {currentRole === "reviewer" || currentRole === "admin" ? (
+          <>
+            <button className="admin-link" onClick={() => setStep(step === "reviewer" ? "welcome" : "reviewer")}>{step === "reviewer" ? "Participant site" : "Reviewer workspace"}</button>
+            {backendConfigured && <button className="admin-link" onClick={handleStaffSignOut}>Sign out</button>}
+          </>
+        ) : (
+          <Link className="admin-link" href="/signin">Sign in</Link>
+        )}
       </header>
 
       {step !== "welcome" && step !== "reviewer" && (
