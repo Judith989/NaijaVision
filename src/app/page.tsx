@@ -43,6 +43,8 @@ const fallbackNigerianBanks = [
 const REGULAR_COMPENSATION = { amount: 4000, currency: "NGN" };
 const FULL_COMPENSATION = { amount: 5000, currency: "NGN" };
 const SAFE_SPEECH_BONUS = 1000;
+const MIN_LIGHT_LEVEL = 25;
+const MAX_LIGHT_LEVEL = 240;
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -807,7 +809,7 @@ export default function Home() {
           }
           const averageLight = luminance / (pixels.length / 16);
           setLightLevel(Math.round(averageLight));
-          if (averageLight >= 45 && averageLight <= 225) lightStableFramesRef.current += 1;
+          if (averageLight >= MIN_LIGHT_LEVEL && averageLight <= MAX_LIGHT_LEVEL) lightStableFramesRef.current += 1;
           else lightStableFramesRef.current = Math.max(0, lightStableFramesRef.current - 2);
           const previewContext = mouthPreviewRef.current?.getContext("2d");
           if (previewContext && mouthPreviewRef.current) {
@@ -1228,13 +1230,13 @@ export default function Home() {
                 ["Microphone access", stream?.getAudioTracks().length ? "Connected" : "Waiting", !!stream?.getAudioTracks().length],
                 ["Mouth crop", cameraPassed ? "Face forward, 720p input, lips tracked" : "Not yet passed", cameraPassed],
                 ["Microphone check", audioPassed ? "Live microphone track is ready" : "Allow microphone access and check that a microphone is connected", audioPassed],
-                ["Lighting", lightingPassed ? "Lighting is ready" : lightLevel < 45 ? "The image is too dark. Add light in front of you." : "The image is too bright. Reduce direct light.", lightingPassed],
+                ["Lighting", lightingPassed ? `Lighting is ready at ${lightLevel}` : lightLevel < MIN_LIGHT_LEVEL ? `Brightness ${lightLevel}. Add a little light in front of you.` : `Brightness ${lightLevel}. Reduce harsh direct light.`, lightingPassed],
               ].map(([label, value, ok]) => <div className="device-check" key={String(label)}><span className={ok ? "ok" : ""}>{ok ? "✓" : "·"}</span><div><b>{label}</b><small>{value}</small></div></div>)}
               <div className="tip"><b>All checks are required</b><p>Recording remains locked until a live microphone track and the mouth, camera, and lighting checks pass. Volume, background noise, clipping, and speech activity are saved as reviewer warnings, but they do not block this test.</p></div>
             </div>
           </div>
           <div className="requirements">
-            <div><h3>Environment</h3><p>Choose a quiet location with sufficient front lighting. Keep the camera steady at eye level, avoid strong backlighting, and minimize movement behind you.</p></div>
+            <div><h3>Environment</h3><p>Choose a quiet location with usable front lighting. The accepted brightness range is {MIN_LIGHT_LEVEL} to {MAX_LIGHT_LEVEL}. Keep the camera steady at eye level, avoid strong backlighting, and minimize movement behind you.</p></div>
             <div><h3>Audio and delivery</h3><p>Speak naturally without whispering or rushing. Pause briefly between prompts and do not use voice-changing software.</p></div>
             <div><h3>Position and equipment</h3><p>Look toward the camera, keep your face centered, and remain about 50 to 100 cm away. Recommended minimum: 720p video, 30 fps, and 8 kHz audio.</p></div>
           </div>
