@@ -15,7 +15,7 @@ create type public.withdrawal_status as enum ('requested', 'processing', 'comple
 
 create table public.profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
-  participant_id text not null unique default ('NV-' || upper(substr(encode(gen_random_bytes(8), 'hex'), 1, 12))),
+  participant_id text not null unique default ('NV-' || upper(substr(encode(extensions.gen_random_bytes(8), 'hex'), 1, 12))),
   display_name text,
   role public.app_role not null default 'participant',
   account_status text not null default 'active' check (account_status in ('active', 'suspended', 'closed')),
