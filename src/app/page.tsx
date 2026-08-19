@@ -198,7 +198,36 @@ export default function Home() {
       setAccount((current) => ({ ...current, contactMethod: data.user.email ? "Email" : "Phone number", contact: data.user.email || data.user.phone || current.contact }));
       const role = await getCurrentRole();
       setCurrentRole(role);
-      if (requestedMode.get("contribute") === "1") setStep("account");
+      if (requestedMode.get("contribute") === "1") {
+        const { data: savedPayout } = await supabase
+          .from("payout_accounts")
+          .select("country,bank_code,bank_name,account_name,account_last4,verified_at")
+          .eq("user_id", data.user.id)
+          .maybeSingle();
+        if (savedPayout?.verified_at && requestedMode.get("payment") !== "edit") {
+          setAccount((current) => ({
+            ...current,
+            payoutCountry: savedPayout.country,
+            bankCode: savedPayout.bank_code,
+            bankName: savedPayout.bank_name,
+            accountName: savedPayout.account_name,
+            accountNumber: savedPayout.account_last4,
+          }));
+          setBankVerified(true);
+          setStep("study");
+        } else {
+          if (savedPayout) setAccount((current) => ({
+            ...current,
+            payoutCountry: savedPayout.country,
+            bankCode: savedPayout.bank_code,
+            bankName: savedPayout.bank_name,
+            accountName: savedPayout.account_name,
+            accountNumber: "",
+          }));
+          setBankVerified(false);
+          setStep("account");
+        }
+      }
       if (requestedMode.get("reviewer") === "1" && (role === "reviewer" || role === "admin")) setStep("reviewer");
       const { data: policy } = await supabase.from("compensation_policies").select("amount,currency").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle();
       if (policy) setCompensation(policy);
