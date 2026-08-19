@@ -32,6 +32,9 @@ file_size_limit = "50MiB"
 [functions.tokenize-payout-account]
 verify_jwt = true
 
+[functions.list-nigerian-banks]
+verify_jwt = true
+
 [functions.process-payment]
 verify_jwt = true
 

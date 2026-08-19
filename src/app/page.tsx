@@ -29,6 +29,18 @@ const deviceTypes = ["Smartphone", "Tablet", "Laptop", "Desktop", "External Came
 const operatingSystems = ["Android", "iOS", "Windows", "macOS", "Linux", "Other"];
 const taskOptions = ["Reading prompted sentences", "Free speech", "Picture description", "Conversation", "Storytelling", "Emotion expression", "Sign-supported speech", "Lip movement recording", "Harmful speech annotation", "Translation", "Code-switching tasks"];
 const accessibilityOptions = ["Screen reader", "Voice control", "Hearing aid", "Captioning", "None", "Other"];
+const fallbackNigerianBanks = [
+  { name: "Access Bank", code: "044" }, { name: "Citibank Nigeria", code: "023" },
+  { name: "Ecobank Nigeria", code: "050" }, { name: "Fidelity Bank", code: "070" },
+  { name: "First Bank of Nigeria", code: "011" }, { name: "First City Monument Bank", code: "214" },
+  { name: "Guaranty Trust Bank", code: "058" }, { name: "Jaiz Bank", code: "301" },
+  { name: "Keystone Bank", code: "082" }, { name: "Polaris Bank", code: "076" },
+  { name: "Providus Bank", code: "101" }, { name: "Stanbic IBTC Bank", code: "221" },
+  { name: "Standard Chartered Bank", code: "068" }, { name: "Sterling Bank", code: "232" },
+  { name: "United Bank for Africa", code: "033" }, { name: "Union Bank of Nigeria", code: "032" },
+  { name: "Unity Bank", code: "215" }, { name: "Wema Bank", code: "035" },
+  { name: "Zenith Bank", code: "057" },
+];
 const REGULAR_COMPENSATION = { amount: 4000, currency: "NGN" };
 const FULL_COMPENSATION = { amount: 5000, currency: "NGN" };
 
@@ -88,11 +100,14 @@ function MultiSelect({ options, value, onChange }: { options: string[]; value: s
 
 export default function Home() {
   const [step, setStep] = useState<Step>("welcome");
-  const [account, setAccount] = useState({ contactMethod: "Email", contact: "", payoutCountry: "Nigeria", bankName: "", accountName: "", accountNumber: "" });
+  const [account, setAccount] = useState({ contactMethod: "Email", contact: "", payoutCountry: "Nigeria", bankName: "", bankCode: "", accountName: "", accountNumber: "" });
   const [authRequested, setAuthRequested] = useState(false);
   const [authCode, setAuthCode] = useState("");
   const [authVerified, setAuthVerified] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
+  const [nigerianBanks, setNigerianBanks] = useState(fallbackNigerianBanks);
+  const [bankVerified, setBankVerified] = useState(false);
+  const [verifyingBank, setVerifyingBank] = useState(false);
   const [authenticatedUserId, setAuthenticatedUserId] = useState("");
   const [currentRole, setCurrentRole] = useState<"participant" | "reviewer" | "admin">("participant");
   const [consent, setConsent] = useState({ adult: false, informed: false, publicUse: false });
@@ -162,6 +177,14 @@ export default function Home() {
   useEffect(() => { loadClips().then((items) => setClips(items.filter((clip) => clip.metadata?.sessionId === profile.code))).catch(() => undefined); }, [profile.code]);
   useEffect(() => { fetch(`${BASE_PATH}/nigeria-lgas.json`).then((response) => response.json()).then(setLgas).catch(() => setLgas({})); }, []);
   useEffect(() => { setHasDraft(Boolean(localStorage.getItem("naijavision-contribution-draft"))); }, []);
+  useEffect(() => {
+    if (step !== "account" || !authenticatedUserId) return;
+    const supabase = getSupabase();
+    if (!supabase) return;
+    supabase.functions.invoke("list-nigerian-banks").then(({ data }) => {
+      if (Array.isArray(data?.banks) && data.banks.length) setNigerianBanks(data.banks);
+    });
+  }, [step, authenticatedUserId]);
   useEffect(() => {
     const supabase = getSupabase();
     if (!supabase) return;
@@ -376,21 +399,34 @@ export default function Home() {
     setStep("welcome");
   }
 
-  async function savePayoutAndContinue() {
+  async function verifyPayoutAccount() {
     const supabase = getSupabase();
-    if (supabase) {
-      const { error } = await supabase.functions.invoke("tokenize-payout-account", {
+    if (!supabase) return;
+    setVerifyingBank(true);
+    setAuthMessage("Verifying the account with the selected bank...");
+    const { data, error } = await supabase.functions.invoke("tokenize-payout-account", {
         body: {
           country: account.payoutCountry,
           bankName: account.bankName,
-          accountName: account.accountName,
+          bankCode: account.bankCode,
           accountNumber: account.accountNumber,
         },
       });
-      if (error) {
-        setAuthMessage(`Bank details could not be verified: ${error.message}`);
-        return;
-      }
+    setVerifyingBank(false);
+    if (error || data?.error) {
+      setBankVerified(false);
+      setAuthMessage(`Bank details could not be verified: ${data?.error || error?.message || "Verification failed."}`);
+      return;
+    }
+    setAccount((current) => ({ ...current, accountName: data.accountName || current.accountName }));
+    setBankVerified(true);
+    setAuthMessage(`Verified account: ${data.accountName || "Account confirmed"}.`);
+  }
+
+  async function savePayoutAndContinue() {
+    if (!bankVerified) {
+      setAuthMessage("Verify the bank account before continuing.");
+      return;
     }
     setStep("study");
   }
@@ -980,14 +1016,14 @@ export default function Home() {
             <label><span>Contact method</span><select value={account.contactMethod} onChange={(e) => setAccount({ ...account, contactMethod: e.target.value })}><option>Email</option><option>Phone number</option></select></label>
             <label><span>{account.contactMethod}</span><input value={account.contact} onChange={(e) => setAccount({ ...account, contact: e.target.value })} placeholder={account.contactMethod === "Email" ? "name@example.com" : "+234..."} /></label>
             <label><span>Bank country</span><select value={account.payoutCountry} onChange={(e) => setAccount({ ...account, payoutCountry: e.target.value })}>{countries.map((country) => <option key={country}>{country}</option>)}</select></label>
-            <label><span>Bank name</span><input value={account.bankName} onChange={(e) => setAccount({ ...account, bankName: e.target.value })} placeholder="Enter your bank name" /></label>
-            <label><span>Account name</span><input value={account.accountName} onChange={(e) => setAccount({ ...account, accountName: e.target.value })} placeholder="Name registered with the bank" /></label>
-            <label><span>Account number</span><input inputMode="numeric" value={account.accountNumber} onChange={(e) => setAccount({ ...account, accountNumber: e.target.value.replace(/\D/g, "") })} placeholder="Enter account number" /></label>
+            <label><span>Bank name</span><select value={account.bankCode} onChange={(e) => { const bank = nigerianBanks.find((item) => item.code === e.target.value); setAccount({ ...account, bankCode: e.target.value, bankName: bank?.name || "", accountName: "" }); setBankVerified(false); }}><option value="">Select your bank</option>{nigerianBanks.map((bank) => <option key={bank.code} value={bank.code}>{bank.name}</option>)}</select></label>
+            <label><span>Account name</span><input value={account.accountName} readOnly placeholder="Shown after verification" /></label>
+            <label className="wide"><span>10-digit account number</span><div className="inline-verify"><input inputMode="numeric" maxLength={10} value={account.accountNumber} onChange={(e) => { setAccount({ ...account, accountNumber: e.target.value.replace(/\D/g, "").slice(0, 10), accountName: "" }); setBankVerified(false); }} placeholder="Enter 10 digits" /><button className="secondary" type="button" disabled={verifyingBank || !account.bankCode || account.accountNumber.length !== 10} onClick={verifyPayoutAccount}>{verifyingBank ? "Verifying..." : "Verify account"}</button></div></label>
             {authRequested && !authVerified && <label className="wide"><span>Verification code</span><div className="inline-verify"><input inputMode="numeric" value={authCode} onChange={(e) => setAuthCode(e.target.value)} placeholder="Enter the code you received" /><button className="secondary" type="button" onClick={verifyAccountCode}>Verify</button></div></label>}
           </div>
           <div className="notice"><Mark>i</Mark><p>Compensation becomes payable after a reviewer approves the completed submission. Make sure the account details are correct.</p></div>
           {authMessage && <p className="auth-message">{authMessage}</p>}
-          <div className="footer-actions"><button className="secondary" onClick={() => setStep("welcome")}>Back</button>{authVerified ? <button className="primary" disabled={!account.bankName.trim() || !account.accountName.trim() || account.accountNumber.length < 6} onClick={savePayoutAndContinue}>Save payment details <span>→</span></button> : <button className="primary" disabled={!account.contact.trim()} onClick={requestAccountVerification}>Verify contact <span>→</span></button>}</div>
+          <div className="footer-actions"><button className="secondary" onClick={() => setStep("welcome")}>Back</button>{authVerified ? <button className="primary" disabled={!bankVerified} onClick={savePayoutAndContinue}>Continue with verified account <span>→</span></button> : <button className="primary" disabled={!account.contact.trim()} onClick={requestAccountVerification}>Verify contact <span>→</span></button>}</div>
         </section>
       )}
 

@@ -6,23 +6,30 @@ Deno.serve(async (request) => {
     const { user } = await authenticate(request);
     const input = await request.json();
     const accountNumber = String(input.accountNumber || "").replace(/\D/g, "");
-    if (accountNumber.length < 6 || !input.bankName || !input.accountName || !input.country) {
-      return json({ error: "Complete bank details are required." }, 400);
+    const bankCode = String(input.bankCode || "").trim();
+    if (accountNumber.length !== 10 || !input.bankName || !bankCode || input.country !== "Nigeria") {
+      return json({ error: "Select a Nigerian bank and enter a valid 10-digit account number." }, 400);
     }
 
-    const tokenizationUrl = Deno.env.get("PAYMENTS_PROVIDER_TOKENIZE_URL");
     const apiKey = Deno.env.get("PAYMENTS_PROVIDER_API_KEY");
-    if (!tokenizationUrl || !apiKey) return json({ error: "Payment provider is not configured." }, 503);
+    if (!apiKey) return json({ error: "Bank verification provider is not configured." }, 503);
 
-    const providerResponse = await fetch(tokenizationUrl, {
+    const resolveResponse = await fetch(`https://api.paystack.co/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    const resolveData = await resolveResponse.json();
+    const resolvedName = resolveData.data?.account_name;
+    if (!resolveResponse.ok || !resolvedName) return json({ error: "The account number could not be matched to the selected bank." }, 422);
+
+    const providerResponse = await fetch("https://api.paystack.co/transferrecipient", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        country: input.country,
-        bank_name: input.bankName,
-        bank_code: input.bankCode || input.bankName,
-        account_name: input.accountName,
+        type: "nuban",
+        name: resolvedName,
         account_number: accountNumber,
+        bank_code: bankCode,
+        currency: "NGN",
       }),
     });
     if (!providerResponse.ok) return json({ error: "The bank account could not be verified." }, 422);
@@ -34,11 +41,11 @@ Deno.serve(async (request) => {
     const { error } = await service.from("payout_accounts").upsert({
       user_id: user.id,
       country: input.country,
-      bank_code: input.bankCode || input.bankName,
+      bank_code: bankCode,
       bank_name: input.bankName,
-      account_name: providerData.account_name || providerData.data?.account_name || input.accountName,
+      account_name: resolvedName,
       account_last4: accountNumber.slice(-4),
-      provider: Deno.env.get("PAYMENTS_PROVIDER_NAME") || "configured-provider",
+      provider: Deno.env.get("PAYMENTS_PROVIDER_NAME") || "paystack",
       provider_recipient_code: recipientCode,
       verified_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -56,7 +63,7 @@ Deno.serve(async (request) => {
         evidence: { matching_accounts: sharedAccounts.length },
       });
     }
-    return json({ ok: true, accountLast4: accountNumber.slice(-4) });
+    return json({ ok: true, accountName: resolvedName, accountLast4: accountNumber.slice(-4) });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "Unexpected error" }, 401);
   }
