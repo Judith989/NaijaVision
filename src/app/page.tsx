@@ -493,7 +493,7 @@ export default function Home() {
       .limit(1)
       .single();
     if (versionError || !version) {
-      setToast("The active consent version is unavailable.");
+      setToast("We could not start your contribution. Please try again in a moment or contact support.");
       return;
     }
     const { data, error } = await supabase.rpc("begin_submission", {
