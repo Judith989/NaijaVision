@@ -102,6 +102,7 @@ function MultiSelect({ options, value, onChange }: { options: string[]; value: s
 
 export default function Home() {
   const [step, setStep] = useState<Step>("welcome");
+  const [calibrationReturnStep, setCalibrationReturnStep] = useState<"profile" | "record">("profile");
   const [account, setAccount] = useState({ contactMethod: "Email", contact: "", payoutCountry: "Nigeria", bankName: "", bankCode: "", accountName: "", accountNumber: "" });
   const [authRequested, setAuthRequested] = useState(false);
   const [authCode, setAuthCode] = useState("");
@@ -146,6 +147,9 @@ export default function Home() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [qualityConfirm, setQualityConfirm] = useState<string[]>([]);
   const [toast, setToast] = useState("");
+  const [reportingPromptIssue, setReportingPromptIssue] = useState(false);
+  const [promptIssueText, setPromptIssueText] = useState("");
+  const [promptIssueSending, setPromptIssueSending] = useState(false);
   const [submissionStatus, setSubmissionStatus] = useState<"draft" | "pending-review">("draft");
   const [reviewStatus, setReviewStatus] = useState<"pending" | "approved" | "changes-requested" | "declined">("pending");
   const [paymentStatus, setPaymentStatus] = useState<"not-eligible" | "eligible" | "approved">("not-eligible");
@@ -181,6 +185,7 @@ export default function Home() {
   useEffect(() => { loadClips().then((items) => setClips(items.filter((clip) => clip.metadata?.sessionId === profile.code))).catch(() => undefined); }, [profile.code]);
   useEffect(() => { fetch(`${BASE_PATH}/nigeria-lgas.json`).then((response) => response.json()).then(setLgas).catch(() => setLgas({})); }, []);
   useEffect(() => { setHasDraft(Boolean(localStorage.getItem("naijavision-contribution-draft"))); }, []);
+  useEffect(() => { setReportingPromptIssue(false); setPromptIssueText(""); }, [promptIndex]);
   useEffect(() => {
     if (step !== "account" || !authenticatedUserId) return;
     const supabase = getSupabase();
@@ -418,7 +423,7 @@ export default function Home() {
       setHarmful(Boolean(draft.harmful));
       setPromptIndex(Number(draft.promptIndex) || 0);
       setSubmissionId(String(draft.submissionId || ""));
-      setStep("calibrate");
+      openCalibration("record");
     } catch {
       localStorage.removeItem("naijavision-contribution-draft");
       setHasDraft(false);
@@ -429,6 +434,54 @@ export default function Home() {
     const missingIndex = prompts.findIndex((prompt) => !clips.some((clip) => clip.promptId === prompt.id));
     setPromptIndex(missingIndex >= 0 ? missingIndex : Math.min(promptIndex, prompts.length - 1));
     setStep("record");
+  }
+
+  function openCalibration(returnStep: "profile" | "record") {
+    if (calibrationFrameRef.current !== null) cancelAnimationFrame(calibrationFrameRef.current);
+    calibrationFrameRef.current = null;
+    stream?.getTracks().forEach((track) => track.stop());
+    processedStreamRef.current?.getTracks().forEach((track) => track.stop());
+    processedStreamRef.current = null;
+    void audioContextRef.current?.close().catch(() => undefined);
+    audioContextRef.current = null;
+    analyserRef.current = null;
+    faceLandmarkerRef.current?.close();
+    faceLandmarkerRef.current = null;
+    setStream(null);
+    setCameraPassed(false);
+    setAudioPassed(false);
+    setLightingPassed(false);
+    setLightLevel(0);
+    setCalibrating(false);
+    setCalibrationMessage("Enable the camera and microphone to begin.");
+    setCalibrationReturnStep(returnStep);
+    setStep("calibrate");
+  }
+
+  async function submitPromptIssue() {
+    const issue = promptIssueText.trim();
+    if (!issue || !current) return;
+    setPromptIssueSending(true);
+    const supabase = getSupabase();
+    if (supabase && authenticatedUserId) {
+      const { error } = await supabase.from("prompt_issue_reports").insert({
+        user_id: authenticatedUserId,
+        submission_id: submissionId || null,
+        prompt_id: current.id,
+        issue_text: issue,
+      });
+      if (error) {
+        setPromptIssueSending(false);
+        setToast("The prompt report could not be sent. Please try again.");
+        setTimeout(() => setToast(""), 3000);
+        return;
+      }
+    }
+    setPromptIssueSending(false);
+    setReportingPromptIssue(false);
+    setPromptIssueText("");
+    setToast("Prompt issue submitted for review.");
+    setTimeout(() => setToast(""), 2500);
   }
 
   async function requestAccountVerification() {
@@ -519,7 +572,7 @@ export default function Home() {
     const supabase = getSupabase();
     if (!supabase) {
       setPromptIndex(0);
-      setStep("calibrate");
+      openCalibration("profile");
       return;
     }
     if (submissionId) {
@@ -534,7 +587,7 @@ export default function Home() {
         return;
       }
       setPromptIndex(0);
-      setStep("calibrate");
+      openCalibration("profile");
       return;
     }
     const { data: version, error: versionError } = await supabase
@@ -560,7 +613,7 @@ export default function Home() {
     }
     setSubmissionId(data);
     setPromptIndex(0);
-    setStep("calibrate");
+    openCalibration("profile");
   }
 
   async function uploadAndFinalizeSubmission() {
@@ -766,9 +819,12 @@ export default function Home() {
 
   function mediaTracksOff() {
     stream?.getTracks().forEach((track) => track.stop());
+    processedStreamRef.current?.getTracks().forEach((track) => track.stop());
+    processedStreamRef.current = null;
     setStream(null);
     setCameraPassed(false);
     setAudioPassed(false);
+    setLightingPassed(false);
     setCalibrating(false);
   }
 
@@ -1280,7 +1336,7 @@ export default function Home() {
             <h3>Participant recording checklist</h3><p>Confirm the environment and speaking conditions. Face visibility and audio activity are tested automatically above.</p>
             <MultiSelect options={["Good lighting", "Minimal background noise", "Camera stable", "Mouth unobstructed", "Speech will be natural", "No expected interruption"]} value={qualityConfirm} onChange={setQualityConfirm} />
           </div>
-          <div className="footer-actions"><button className="secondary" onClick={() => setStep("profile")}>Back</button><button className="primary" disabled={!cameraPassed || !audioPassed || !lightingPassed || !processedStreamRef.current} onClick={() => setStep("record")}>Start recording <span>→</span></button></div>
+          <div className="footer-actions"><button className="secondary" onClick={() => setStep(calibrationReturnStep)}>Back</button><button className="primary" disabled={!cameraPassed || !audioPassed || !lightingPassed || !processedStreamRef.current} onClick={() => setStep("record")}>Start recording <span>→</span></button></div>
         </section>
       )}
 
@@ -1299,8 +1355,13 @@ export default function Home() {
 
             <div className="quick-actions">
               <div className="eyebrow">Quick actions</div>
-              <button className="quick-action" onClick={() => setStep("calibrate")}><span>Re-test equipment</span><small>Mic/Cam</small></button>
-              <button className="quick-action" onClick={() => { setToast("Issue reported. A reviewer will follow up."); setTimeout(() => setToast(""), 2200); }}><span>Report issue with prompt</span></button>
+              <button className="quick-action" onClick={() => openCalibration("record")}><span>Re-test equipment</span><small>Mic/Cam</small></button>
+              <button className="quick-action" onClick={() => setReportingPromptIssue((open) => !open)}><span>Report issue with prompt</span><small>{current.id}</small></button>
+              {reportingPromptIssue && <div className="prompt-issue-form">
+                <label htmlFor="prompt-issue-text">Describe the problem with {current.id}</label>
+                <textarea id="prompt-issue-text" value={promptIssueText} maxLength={2000} onChange={(event) => setPromptIssueText(event.target.value)} placeholder="Tell us what is incorrect, unclear, offensive, or difficult to read." autoFocus />
+                <div><button className="text-button" type="button" onClick={() => { setReportingPromptIssue(false); setPromptIssueText(""); }}>Cancel</button><button className="secondary" type="button" disabled={promptIssueText.trim().length < 3 || promptIssueSending} onClick={submitPromptIssue}>{promptIssueSending ? "Sending..." : "Submit report"}</button></div>
+              </div>}
               <button className="quick-action" onClick={() => setStep("study")}><span>Privacy & study notice</span></button>
             </div>
 
@@ -1326,8 +1387,9 @@ export default function Home() {
                   <button className="primary full" onClick={acceptRecording}>Accept recording</button>
                   <button className="secondary full" onClick={redo}>Redo recording</button>
                 </> : <>
-                  <button className={`record-button ${recording ? "stop" : ""}`} onClick={recording ? stopRecording : beginRecording}><i />{recording ? "Stop" : "Record"}</button>
-                  <p>{recording ? "Speak the prompt, then press stop." : "Press record when you are ready."}</p>
+                  <button className={`record-button ${recording ? "stop" : ""}`} disabled={!recording && (!cameraPassed || !audioPassed || !lightingPassed || !processedStreamRef.current)} onClick={recording ? stopRecording : beginRecording}><i />{recording ? "Stop" : "Record"}</button>
+                  <p>{recording ? "Speak the prompt, then press stop." : cameraPassed && audioPassed && lightingPassed && processedStreamRef.current ? "Press record when you are ready." : "Calibration is required on this device before recording."}</p>
+                  {!recording && (!cameraPassed || !audioPassed || !lightingPassed || !processedStreamRef.current) && <button className="secondary full" onClick={() => openCalibration("record")}>Run equipment calibration</button>}
                   <button className="skip" onClick={() => setPromptIndex((promptIndex + 1) % prompts.length)}>Skip this prompt</button>
                   {clips.length > 0 && <button className="skip review-shortcut" onClick={() => setStep("review")}>Review {clips.length} completed recording{clips.length === 1 ? "" : "s"}</button>}
                 </>}
