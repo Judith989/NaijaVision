@@ -8,10 +8,13 @@ import { Mark } from "../lib/ui";
 
 export default function SignUpPage() {
   const router = useRouter();
-  const [fullName, setFullName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [message, setMessage] = useState("");
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -27,6 +30,7 @@ export default function SignUpPage() {
   }, [router]);
 
   const passwordsMatch = password.length >= 8 && password === confirmPassword;
+  const capitalizeName = (value: string) => value.trim().replace(/\b\p{L}/gu, (letter) => letter.toLocaleUpperCase());
 
   async function handleSignUp() {
     setMessage("");
@@ -39,11 +43,22 @@ export default function SignUpPage() {
       setMessage("Passwords must match and be at least 8 characters.");
       return;
     }
+    if (!firstName.trim() || !lastName.trim()) {
+      setMessage("Enter your First name and Last name.");
+      return;
+    }
+    const normalizedFirstName = capitalizeName(firstName);
+    const normalizedLastName = capitalizeName(lastName);
     setLoading(true);
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { full_name: staffMode ? fullName || undefined : undefined, requesting_staff_access: staffMode } },
+      options: { data: {
+        first_name: normalizedFirstName,
+        last_name: normalizedLastName,
+        full_name: `${normalizedFirstName} ${normalizedLastName}`,
+        requesting_staff_access: staffMode,
+      } },
     });
     setLoading(false);
     if (error) {
@@ -91,21 +106,25 @@ export default function SignUpPage() {
         ) : (
           <>
             <div className="form-grid">
-              {staffMode && <label className="wide">
-                <span>Full name <small>optional</small></span>
-                <input type="text" autoComplete="name" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="e.g. Adaeze Nwosu" />
-              </label>}
+              <label>
+                <span>First name</span>
+                <input type="text" autoComplete="given-name" autoCapitalize="words" value={firstName} onChange={(e) => setFirstName(e.target.value)} onBlur={() => setFirstName(capitalizeName(firstName))} placeholder="e.g. Adaeze" />
+              </label>
+              <label>
+                <span>Last name</span>
+                <input type="text" autoComplete="family-name" autoCapitalize="words" value={lastName} onChange={(e) => setLastName(e.target.value)} onBlur={() => setLastName(capitalizeName(lastName))} placeholder="e.g. Nwosu" />
+              </label>
               <label className="wide">
                 <span>Email</span>
                 <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
               </label>
               <label>
                 <span>Password</span>
-                <input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 8 characters" />
+                <div className="password-field"><input type={showPassword ? "text" : "password"} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 8 characters" /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? "Hide" : "Show"}</button></div>
               </label>
               <label>
                 <span>Confirm password</span>
-                <input type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Re-enter your password" />
+                <div className="password-field"><input type={showConfirmPassword ? "text" : "password"} autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Re-enter your password" /><button type="button" onClick={() => setShowConfirmPassword((visible) => !visible)} aria-label={showConfirmPassword ? "Hide confirmation password" : "Show confirmation password"}>{showConfirmPassword ? "Hide" : "Show"}</button></div>
               </label>
             </div>
 
@@ -113,7 +132,7 @@ export default function SignUpPage() {
 
             <div className="footer-actions">
           <Link className="secondary" href="/signin?next=/dashboard">Already have an account?</Link>
-              <button className="primary" disabled={loading || !email.trim() || !passwordsMatch} onClick={handleSignUp}>
+              <button className="primary" disabled={loading || !firstName.trim() || !lastName.trim() || !email.trim() || !passwordsMatch} onClick={handleSignUp}>
                 {loading ? "Creating account…" : "Create account"}
               </button>
             </div>
