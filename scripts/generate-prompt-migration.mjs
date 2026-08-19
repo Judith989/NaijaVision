@@ -2,15 +2,25 @@ import { corePrompts, safeSpeechPrompts } from "../src/app/prompts.ts";
 
 const quote = (value) => value == null ? "null" : `'${String(value).replaceAll("'", "''")}'`;
 const prompts = [...corePrompts, ...safeSpeechPrompts];
+const safeSequences = {
+  "SAFE-CS-001": ["Igbo", "Nigerian English"],
+  "SAFE-CS-002": ["Yorùbá", "Nigerian Pidgin"],
+  "SAFE-CS-003": ["Hausa", "Nigerian English"],
+  "SAFE-CS-004": ["Nigerian Pidgin", "Nigerian English"],
+};
 const rows = prompts.map((prompt) => {
-  const sequence = prompt.type === "Code-switching"
+  const isNumberPrompt = prompt.type === "Numbers and names";
+  const safeSequence = safeSequences[prompt.id];
+  const storedType = isNumberPrompt ? "Reading" : safeSequence ? "Code-switching" : prompt.type;
+  const storedLanguage = isNumberPrompt ? "Nigerian English" : safeSequence ? safeSequence.join(" + ") : prompt.language;
+  const sequence = safeSequence || (prompt.type === "Code-switching"
     ? prompt.language.split("+").map((value) => value.trim())
-    : [prompt.language];
+    : [storedLanguage]);
   return `(${[
     quote(prompt.id),
     "1",
-    quote(prompt.type),
-    quote(prompt.language),
+    quote(storedType),
+    quote(storedLanguage),
     `array[${sequence.map(quote).join(",")}]::text[]`,
     quote(prompt.text),
     quote(prompt.text.toLocaleLowerCase()),
