@@ -27,7 +27,6 @@ const countries = ["Nigeria", "Ghana", "Cameroon", "Benin", "Togo", "Other"];
 const educationOptions = ["No formal education", "Primary", "Secondary", "Vocational", "Bachelor's", "Master's", "Doctorate", "Other"];
 const deviceTypes = ["Smartphone", "Tablet", "Laptop", "Desktop", "External Camera", "Other"];
 const operatingSystems = ["Android", "iOS", "Windows", "macOS", "Linux", "Other"];
-const taskOptions = ["Reading prompted sentences", "Free speech", "Picture description", "Conversation", "Storytelling", "Emotion expression", "Sign-supported speech", "Lip movement recording", "Harmful speech annotation", "Translation", "Code-switching tasks"];
 const accessibilityOptions = ["Screen reader", "Voice control", "Hearing aid", "Captioning", "None", "Other"];
 const fallbackNigerianBanks = [
   { name: "Access Bank", code: "044" }, { name: "Citibank Nigeria", code: "023" },
@@ -123,7 +122,7 @@ export default function Home() {
     deviceType: "Laptop", operatingSystem: "", deviceBrand: "", deviceModel: "", cameraResolution: "", microphoneType: "Built-in",
     deviceAge: "1–2 years", deviceOwnership: "Personal", deviceFrequency: "Daily",
     recordingLocation: "Home", noiseLevel: "Quiet", lighting: "Indoor lighting", internet: "Wi-Fi",
-    accessibility: ["None"] as string[], tasks: ["Reading prompted sentences", "Lip movement recording"] as string[],
+    accessibility: ["None"] as string[],
     feedbackEase: "", technicalProblems: "", comments: "",
   });
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -314,6 +313,15 @@ export default function Home() {
     });
     return [...eligible, ...safe];
   }, [harmful, selectedLanguages]);
+  const assignedTasks = useMemo(() => Array.from(new Set([
+    "Lip movement recording",
+    ...prompts.map((prompt) => {
+      if (prompt.type === "Natural speech") return "Free speech";
+      if (prompt.type === "Code-switching") return "Code-switching tasks";
+      if (prompt.type === "NaijaSafeSpeech") return "NaijaSafeSpeech reading";
+      return "Reading prompted sentences";
+    }),
+  ])), [prompts]);
   const current = prompts[promptIndex];
   const consentReady = Object.values(consent).every(Boolean);
   const acceptedCount = clips.filter((c) => c.status === "accepted").length;
@@ -462,7 +470,7 @@ export default function Home() {
     const { data, error } = await supabase.rpc("begin_submission", {
       p_consent_version_id: version.id,
       p_safe_speech_opt_in: harmful,
-      p_survey: profile,
+      p_survey: { ...profile, tasks: assignedTasks },
       p_languages: Array.from(selectedLanguages),
     });
     if (error) {
@@ -1150,7 +1158,6 @@ export default function Home() {
             <label><span>Background noise level</span><select value={profile.noiseLevel} onChange={(e) => setProfile({ ...profile, noiseLevel: e.target.value })}>{["Very quiet","Quiet","Moderate","Loud","Very loud"].map((item) => <option key={item}>{item}</option>)}</select></label>
             <label><span>Lighting condition</span><select value={profile.lighting} onChange={(e) => setProfile({ ...profile, lighting: e.target.value })}>{["Bright daylight","Indoor lighting","Low light","Mixed lighting"].map((item) => <option key={item}>{item}</option>)}</select></label>
             <label><span>Internet during recording</span><select value={profile.internet} onChange={(e) => setProfile({ ...profile, internet: e.target.value })}><option>Wi-Fi</option><option>Mobile Data</option><option>Offline</option></select></label>
-            <label className="wide"><span>Recording tasks <small>select multiple</small></span><MultiSelect options={taskOptions} value={profile.tasks} onChange={(value) => setProfile({ ...profile, tasks: value })} /></label>
           </div></div>
           <div className="footer-actions"><button className="secondary" onClick={() => setStep("consent")}>Back</button><button className="primary" onClick={prepareBackendSubmission}>Continue to setup <span>→</span></button></div>
         </section>
