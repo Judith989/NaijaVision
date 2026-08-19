@@ -43,7 +43,7 @@ export default function SignUpPage() {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { full_name: fullName || undefined, requesting_staff_access: staffMode } },
+      options: { data: { full_name: staffMode ? fullName || undefined : undefined, requesting_staff_access: staffMode } },
     });
     setLoading(false);
     if (error) {
@@ -91,10 +91,10 @@ export default function SignUpPage() {
         ) : (
           <>
             <div className="form-grid">
-              <label className="wide">
+              {staffMode && <label className="wide">
                 <span>Full name <small>optional</small></span>
                 <input type="text" autoComplete="name" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="e.g. Adaeze Nwosu" />
-              </label>
+              </label>}
               <label className="wide">
                 <span>Email</span>
                 <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
