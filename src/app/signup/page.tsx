@@ -19,7 +19,12 @@ export default function SignUpPage() {
 
   useEffect(() => {
     setStaffMode(new URLSearchParams(window.location.search).get("staff") === "1");
-  }, []);
+    const supabase = getSupabase();
+    if (!supabase) return;
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) router.replace("/dashboard");
+    });
+  }, [router]);
 
   const passwordsMatch = password.length >= 8 && password === confirmPassword;
 
