@@ -107,6 +107,8 @@ export default function Home() {
   const [nigerianBanks, setNigerianBanks] = useState(fallbackNigerianBanks);
   const [bankVerified, setBankVerified] = useState(false);
   const [verifyingBank, setVerifyingBank] = useState(false);
+  const [paymentEditMode, setPaymentEditMode] = useState(false);
+  const [savedAccountLast4, setSavedAccountLast4] = useState("");
   const [authenticatedUserId, setAuthenticatedUserId] = useState("");
   const [currentRole, setCurrentRole] = useState<"participant" | "reviewer" | "admin">("participant");
   const [consent, setConsent] = useState({ adult: false, informed: false, publicUse: false });
@@ -189,6 +191,8 @@ export default function Home() {
     if (!supabase) return;
     supabase.auth.getUser().then(async ({ data }) => {
       const requestedMode = new URLSearchParams(window.location.search);
+      const editingPayment = requestedMode.get("payment") === "edit";
+      setPaymentEditMode(editingPayment);
       if (!data.user) {
         if (requestedMode.get("contribute") === "1" || requestedMode.get("reviewer") === "1") window.location.replace(`${BASE_PATH}/signin?next=/dashboard`);
         return;
@@ -216,14 +220,17 @@ export default function Home() {
           setBankVerified(true);
           setStep("study");
         } else {
-          if (savedPayout) setAccount((current) => ({
-            ...current,
-            payoutCountry: savedPayout.country,
-            bankCode: savedPayout.bank_code,
-            bankName: savedPayout.bank_name,
-            accountName: savedPayout.account_name,
-            accountNumber: "",
-          }));
+          if (savedPayout) {
+            setSavedAccountLast4(savedPayout.account_last4);
+            setAccount((current) => ({
+              ...current,
+              payoutCountry: savedPayout.country,
+              bankCode: savedPayout.bank_code,
+              bankName: savedPayout.bank_name,
+              accountName: savedPayout.account_name,
+              accountNumber: "",
+            }));
+          }
           setBankVerified(false);
           setStep("account");
         }
@@ -473,6 +480,10 @@ export default function Home() {
   async function savePayoutAndContinue() {
     if (!bankVerified) {
       setAuthMessage("Verify the bank account before continuing.");
+      return;
+    }
+    if (paymentEditMode) {
+      window.location.assign(`${BASE_PATH}/dashboard`);
       return;
     }
     setStep("study");
@@ -1068,7 +1079,8 @@ export default function Home() {
 
       {step === "account" && (
         <section className="shell narrow">
-          <div className="section-head"><div><div className="eyebrow">Participant account</div><h2>Create your contribution record.</h2><p>Use a contact method you can verify and bank details that can receive your compensation after approval.</p></div></div>
+          <div className="section-head"><div><div className="eyebrow">{paymentEditMode ? "Payment settings" : "Participant account"}</div><h2>{paymentEditMode ? "Update payment details." : "Create your contribution record."}</h2><p>{paymentEditMode ? "Verify a replacement Nigerian bank account for future approved compensation." : "Use a contact method you can verify and bank details that can receive your compensation after approval."}</p></div></div>
+          {paymentEditMode && savedAccountLast4 && <div className="notice"><Mark>i</Mark><p>Your current verified payment account ends in <b>{savedAccountLast4}</b>. Enter the full 10-digit number below only when replacing it.</p></div>}
           <div className="form-grid">
             <label><span>Contact method</span><select value={account.contactMethod} onChange={(e) => setAccount({ ...account, contactMethod: e.target.value })}><option>Email</option><option>Phone number</option></select></label>
             <label><span>{account.contactMethod}</span><input value={account.contact} onChange={(e) => setAccount({ ...account, contact: e.target.value })} placeholder={account.contactMethod === "Email" ? "name@example.com" : "+234..."} /></label>
@@ -1080,7 +1092,7 @@ export default function Home() {
           </div>
           <div className="notice"><Mark>i</Mark><p>Compensation becomes payable after a reviewer approves the completed submission. Make sure the account details are correct.</p></div>
           {authMessage && <p className="auth-message">{authMessage}</p>}
-          <div className="footer-actions"><button className="secondary" onClick={() => setStep("welcome")}>Back</button>{authVerified ? <button className="primary" disabled={!bankVerified} onClick={savePayoutAndContinue}>Continue with verified account <span>→</span></button> : <button className="primary" disabled={!account.contact.trim()} onClick={requestAccountVerification}>Verify contact <span>→</span></button>}</div>
+          <div className="footer-actions"><button className="secondary" onClick={() => paymentEditMode ? window.location.assign(`${BASE_PATH}/dashboard`) : setStep("welcome")}>{paymentEditMode ? "Cancel" : "Back"}</button>{authVerified ? <button className="primary" disabled={!bankVerified} onClick={savePayoutAndContinue}>{paymentEditMode ? "Save verified payment details" : "Continue with verified account"} <span>→</span></button> : <button className="primary" disabled={!account.contact.trim()} onClick={requestAccountVerification}>Verify contact <span>→</span></button>}</div>
         </section>
       )}
 
