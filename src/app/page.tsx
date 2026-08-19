@@ -206,6 +206,27 @@ export default function Home() {
       const role = await getCurrentRole();
       setCurrentRole(role);
       if (requestedMode.get("contribute") === "1") {
+        const { data: activeSubmission } = await supabase
+          .from("submissions")
+          .select("id,status,survey_id,consent_id")
+          .not("status", "in", "(paid,rejected,withdrawn)")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const resumableStatuses = ["draft", "recording", "uploading", "changes_requested", "resubmitted"];
+        if (activeSubmission && !resumableStatuses.includes(activeSubmission.status)) {
+          window.location.replace(`${BASE_PATH}/dashboard#review-status`);
+          return;
+        }
+        if (activeSubmission) {
+          const [{ data: savedSurvey }, { data: savedConsent }] = await Promise.all([
+            supabase.from("surveys").select("responses").eq("id", activeSubmission.survey_id).maybeSingle(),
+            supabase.from("consents").select("safe_speech_opt_in").eq("id", activeSubmission.consent_id).maybeSingle(),
+          ]);
+          if (savedSurvey?.responses) setProfile((current) => ({ ...current, ...savedSurvey.responses }));
+          if (savedConsent) setHarmful(Boolean(savedConsent.safe_speech_opt_in));
+          setSubmissionId(activeSubmission.id);
+        }
         const { data: savedPayout } = await supabase
           .from("payout_accounts")
           .select("country,bank_code,bank_name,account_name,account_last4,verified_at")
@@ -497,6 +518,21 @@ export default function Home() {
   async function prepareBackendSubmission() {
     const supabase = getSupabase();
     if (!supabase) {
+      setPromptIndex(0);
+      setStep("calibrate");
+      return;
+    }
+    if (submissionId) {
+      const { error: resumeError } = await supabase.rpc("resume_submission", {
+        p_submission_id: submissionId,
+        p_safe_speech_opt_in: harmful,
+        p_survey: { ...profile, tasks: assignedTasks },
+        p_languages: Array.from(selectedLanguages),
+      });
+      if (resumeError) {
+        setToast("We could not resume your contribution. Please refresh and try again.");
+        return;
+      }
       setPromptIndex(0);
       setStep("calibrate");
       return;
