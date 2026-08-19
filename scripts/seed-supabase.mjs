@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { createHash } from "node:crypto";
-import { corePrompts, safeSpeechPrompts } from "../app/prompts.ts";
+import { corePrompts, safeSpeechPrompts } from "../src/app/prompts.ts";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
