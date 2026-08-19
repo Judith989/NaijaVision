@@ -7,8 +7,9 @@ extra_search_path = ["public", "extensions"]
 
 [auth]
 enabled = true
-site_url = "https://judith989.github.io/NaijaVision/"
+site_url = "https://naijavision.vercel.app"
 additional_redirect_urls = [
+  "https://naijavision.vercel.app/**",
   "https://judith989.github.io/NaijaVision/**",
   "http://localhost:3000/**"
 ]
