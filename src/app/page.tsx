@@ -42,6 +42,7 @@ const fallbackNigerianBanks = [
 ];
 const REGULAR_COMPENSATION = { amount: 4000, currency: "NGN" };
 const FULL_COMPENSATION = { amount: 5000, currency: "NGN" };
+const SAFE_SPEECH_BONUS = 1000;
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -362,7 +363,9 @@ export default function Home() {
   const consentReady = Object.values(consent).every(Boolean);
   const acceptedCount = clips.filter((c) => c.status === "accepted").length;
   const progress = Math.min(100, (acceptedCount / prompts.length) * 100);
-  const estimatedCompensation = compensation ?? (harmful ? FULL_COMPENSATION : REGULAR_COMPENSATION);
+  const estimatedCompensation = compensation
+    ? { ...compensation, amount: compensation.amount + (harmful ? SAFE_SPEECH_BONUS : 0) }
+    : (harmful ? FULL_COMPENSATION : REGULAR_COMPENSATION);
 
   function saveDraftAndExit() {
     localStorage.setItem("naijavision-contribution-draft", JSON.stringify({
@@ -1109,7 +1112,7 @@ export default function Home() {
             <h3>Review and compensation</h3><p>Submission does not guarantee approval. A trained reviewer checks prompt accuracy, audio and video quality, privacy, duplication, and policy compliance. Payment becomes eligible only after approval under the published compensation policy.</p>
             <div className="compensation-callout">
               <div><small>Regular participation</small><b>{compensation ? `${compensation.amount} ${compensation.currency}` : `${REGULAR_COMPENSATION.amount} ${REGULAR_COMPENSATION.currency}`}</b></div>
-              <div><small>With NaijaSafeSpeech</small><b>{compensation ? `${compensation.amount} ${compensation.currency}` : `${FULL_COMPENSATION.amount} ${FULL_COMPENSATION.currency}`}</b></div>
+              <div><small>With NaijaSafeSpeech</small><b>{compensation ? `${compensation.amount + SAFE_SPEECH_BONUS} ${compensation.currency}` : `${FULL_COMPENSATION.amount} ${FULL_COMPENSATION.currency}`}</b></div>
             </div>
             <h3>Your choice and rights</h3><p>Participation is voluntary. You may skip optional questions, redo recordings, stop before submission, and request access, correction, or withdrawal where applicable. NaijaVSR participation does not require NaijaSafeSpeech participation.</p>
           </article>
