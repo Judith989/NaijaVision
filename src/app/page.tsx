@@ -274,11 +274,13 @@ export default function Home() {
   }, [stream, step]);
   useEffect(() => () => {
     stream?.getTracks().forEach((track) => track.stop());
+  }, [stream]);
+  useEffect(() => () => {
     processedStreamRef.current?.getTracks().forEach((track) => track.stop());
     if (calibrationFrameRef.current) cancelAnimationFrame(calibrationFrameRef.current);
     faceLandmarkerRef.current?.close();
     audioContextRef.current?.close();
-  }, [stream]);
+  }, []);
 
   const selectedLanguages = useMemo(() => new Set([
     profile.primary,
@@ -290,7 +292,8 @@ export default function Home() {
   ].filter(Boolean)), [profile]);
   const prompts = useMemo(() => {
     const eligible = corePrompts.filter((prompt) => {
-      if (prompt.type === "Natural speech" || prompt.type === "Numbers and names") return true;
+      if (prompt.type === "Natural speech") return selectedLanguages.size > 0;
+      if (prompt.type === "Numbers and names") return selectedLanguages.has("Nigerian English");
       if (prompt.type === "Reading") return selectedLanguages.has(prompt.language);
       if (prompt.type === "Code-switching") {
         const required = prompt.language.split("+").map((language) => language.trim());
@@ -299,9 +302,16 @@ export default function Home() {
       return false;
     });
     if (!harmful) return eligible;
-    const safe = safeSpeechPrompts.filter((prompt) => prompt.language === "Code-switched"
-      ? selectedLanguages.size >= 2
-      : selectedLanguages.has(prompt.language));
+    const safeCombinations: Record<string, string[]> = {
+      "SAFE-CS-001": ["Igbo", "Nigerian English"],
+      "SAFE-CS-002": ["Yorùbá", "Nigerian Pidgin"],
+      "SAFE-CS-003": ["Hausa", "Nigerian English"],
+      "SAFE-CS-004": ["Nigerian Pidgin", "Nigerian English"],
+    };
+    const safe = safeSpeechPrompts.filter((prompt) => {
+      if (prompt.language !== "Code-switched") return selectedLanguages.has(prompt.language);
+      return (safeCombinations[prompt.id] || []).every((language) => selectedLanguages.has(language));
+    });
     return [...eligible, ...safe];
   }, [harmful, selectedLanguages]);
   const current = prompts[promptIndex];
@@ -675,6 +685,13 @@ export default function Home() {
 
   async function runCalibration() {
     if (!stream || !faceLandmarkerRef.current || !sourceVideoRef.current || !mouthCanvasRef.current) return;
+    const audioTrack = stream.getAudioTracks()[0];
+    if (!audioTrack || audioTrack.readyState !== "live" || !analyserRef.current || !audioContextRef.current) {
+      setAudioPassed(false);
+      setCalibrationMessage("The microphone is not active. Reconnect the camera and microphone, allow access, then try again.");
+      return;
+    }
+    if (audioContextRef.current.state === "suspended") await audioContextRef.current.resume();
     setCameraPassed(false);
     setAudioPassed(false);
     setLightingPassed(false);
@@ -770,10 +787,14 @@ export default function Home() {
         if (elapsed < 1800) {
           noiseTotal += rms;
           noiseFrames += 1;
-        } else if (rms > 0.01) {
-          speechFramesRef.current += 1;
-          speechTotal += rms;
-          speechFrames += 1;
+        } else {
+          const currentNoiseFloor = noiseFrames ? noiseTotal / noiseFrames : 0;
+          const speechThreshold = Math.max(0.0025, currentNoiseFloor * 1.35);
+          if (rms > speechThreshold) {
+            speechFramesRef.current += 1;
+            speechTotal += rms;
+            speechFrames += 1;
+          }
         }
       }
 
@@ -786,7 +807,6 @@ export default function Home() {
       const noiseFloor = noiseFrames ? noiseTotal / noiseFrames : 0;
       const speechLevel = speechFrames ? speechTotal / speechFrames : 0;
       const snr = noiseFloor > 0 ? 20 * Math.log10(Math.max(speechLevel, 0.0001) / noiseFloor) : 0;
-      const audioTrack = stream.getAudioTracks()[0];
       const sampleRate = audioTrack?.getSettings().sampleRate || audioContextRef.current?.sampleRate || 0;
       const clipping = totalSamples ? clippedSamples / totalSamples : 1;
       const audioOk = Boolean(audioTrack && audioTrack.enabled && audioTrack.readyState === "live" && sampleRate >= 8000 && speechFrames > 0);
