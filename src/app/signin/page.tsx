@@ -27,7 +27,8 @@ export default function SignInPage() {
       setMessage(error.message);
       return;
     }
-    router.push("/");
+    const next = new URLSearchParams(window.location.search).get("next");
+    router.push(next?.startsWith("/") ? next : "/dashboard");
   }
 
   return (
@@ -37,15 +38,15 @@ export default function SignInPage() {
           <span className="brand-icon"><i /><i /><i /></span>
           <span>Naija<span>Vision</span></span>
         </Link>
-        <div className="top-context"><span className="privacy-dot" /> Staff sign in</div>
+        <div className="top-context"><span className="privacy-dot" /> Account sign in</div>
       </header>
 
       <section className="shell narrow">
         <div className="section-head">
           <div>
-            <div className="eyebrow">Reviewer &amp; administrator access</div>
+            <div className="eyebrow">Participant and staff access</div>
             <h2>Sign in to your account.</h2>
-            <p>This page is for reviewers and administrators. Participants should use &ldquo;Begin contribution&rdquo; on the home page instead.</p>
+            <p>Access your contribution dashboard, recording progress, review status, and staff tools where applicable.</p>
           </div>
         </div>
 
@@ -76,7 +77,8 @@ export default function SignInPage() {
           </button>
         </div>
 
-        <p className="auth-switch">Don&apos;t have a staff account? <Link href="/signup">Create one</Link></p>
+        <p className="auth-switch">New participant? <Link href="/signup">Create an account</Link></p>
+        <p className="auth-switch">Reviewer or administrator? <Link href="/signup?staff=1">Request staff access</Link></p>
       </section>
     </main>
   );

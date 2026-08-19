@@ -166,10 +166,18 @@ export default function Home() {
     const supabase = getSupabase();
     if (!supabase) return;
     supabase.auth.getUser().then(async ({ data }) => {
-      if (!data.user) return;
+      const requestedMode = new URLSearchParams(window.location.search);
+      if (!data.user) {
+        if (requestedMode.get("contribute") === "1" || requestedMode.get("reviewer") === "1") window.location.replace(`${BASE_PATH}/signin?next=/dashboard`);
+        return;
+      }
       setAuthenticatedUserId(data.user.id);
       setAuthVerified(true);
-      setCurrentRole(await getCurrentRole());
+      setAccount((current) => ({ ...current, contactMethod: data.user.email ? "Email" : "Phone number", contact: data.user.email || data.user.phone || current.contact }));
+      const role = await getCurrentRole();
+      setCurrentRole(role);
+      if (requestedMode.get("contribute") === "1") setStep("account");
+      if (requestedMode.get("reviewer") === "1" && (role === "reviewer" || role === "admin")) setStep("reviewer");
       const { data: policy } = await supabase.from("compensation_policies").select("amount,currency").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle();
       if (policy) setCompensation(policy);
     });
@@ -882,9 +890,15 @@ export default function Home() {
         <div className="top-context"><span className="privacy-dot" /> {navLabel}</div>
         {currentRole === "reviewer" || currentRole === "admin" ? (
           <>
+            <Link className="admin-link" href="/dashboard">Dashboard</Link>
             <button className="admin-link" onClick={() => setStep(step === "reviewer" ? "welcome" : "reviewer")}>{step === "reviewer" ? "Participant site" : "Reviewer workspace"}</button>
             {backendConfigured && <button className="admin-link" onClick={handleStaffSignOut}>Sign out</button>}
           </>
+        ) : authenticatedUserId ? (
+          <div className="nav-auth-links">
+            <Link className="admin-link" href="/dashboard">Dashboard</Link>
+            <button className="admin-link" onClick={handleStaffSignOut}>Sign out</button>
+          </div>
         ) : (
           <div className="nav-auth-links">
             <Link className="admin-link" href="/signin">Sign in</Link>
@@ -911,8 +925,8 @@ export default function Home() {
               <h1>Help machines <em>see</em><br />the way Nigeria speaks.</h1>
               <p>Contribute short audio-visual recordings in Nigerian languages from anywhere in the world. Create a minimal verified account so approved contributions can be compensated.</p>
               <div className="hero-actions">
-                <button className="primary" onClick={() => setStep("account")}>Begin contribution <span>→</span></button>
-                {hasDraft && <button className="secondary" onClick={resumeDraft}>Resume contribution</button>}
+                <Link className="primary" href={authenticatedUserId ? "/?contribute=1" : "/signin?next=/dashboard"}>Begin contribution <span>→</span></Link>
+                {hasDraft && (authenticatedUserId ? <button className="secondary" onClick={resumeDraft}>Resume contribution</button> : <Link className="secondary" href="/signin?next=/dashboard">Sign in to resume</Link>)}
               </div>
               <div className="trust-row">
                 <div><Mark>◒</Mark><span><b>Privacy-conscious</b><small>Clear consent and permissions</small></span></div>

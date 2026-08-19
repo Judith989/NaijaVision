@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { backendConfigured, getSupabase } from "../lib/supabase";
@@ -15,6 +15,11 @@ export default function SignUpPage() {
   const [message, setMessage] = useState("");
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [staffMode, setStaffMode] = useState(false);
+
+  useEffect(() => {
+    setStaffMode(new URLSearchParams(window.location.search).get("staff") === "1");
+  }, []);
 
   const passwordsMatch = password.length >= 8 && password === confirmPassword;
 
@@ -33,7 +38,7 @@ export default function SignUpPage() {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { full_name: fullName || undefined, requesting_staff_access: true } },
+      options: { data: { full_name: fullName || undefined, requesting_staff_access: staffMode } },
     });
     setLoading(false);
     if (error) {
@@ -41,7 +46,7 @@ export default function SignUpPage() {
       return;
     }
     if (data.session) {
-      router.push("/");
+      router.push("/dashboard");
       return;
     }
     setAwaitingConfirmation(true);
@@ -54,15 +59,15 @@ export default function SignUpPage() {
           <span className="brand-icon"><i /><i /><i /></span>
           <span>Naija<span>Vision</span></span>
         </Link>
-        <div className="top-context"><span className="privacy-dot" /> Staff sign up</div>
+        <div className="top-context"><span className="privacy-dot" /> {staffMode ? "Staff access request" : "Participant sign up"}</div>
       </header>
 
       <section className="shell narrow">
         <div className="section-head">
           <div>
-            <div className="eyebrow">Reviewer &amp; administrator access</div>
-            <h2>Create a staff account.</h2>
-            <p>This creates a plain account with no special access. An administrator must grant reviewer or admin permissions afterward from the reviewer workspace.</p>
+            <div className="eyebrow">{staffMode ? "Reviewer and administrator access" : "Open research participation"}</div>
+            <h2>{staffMode ? "Request a staff account." : "Create your participant account."}</h2>
+            <p>{staffMode ? "This creates a plain account with no special access. An administrator must approve reviewer or admin permissions afterward." : "Use this account to contribute recordings, save progress, follow review decisions, and receive approved compensation."}</p>
           </div>
         </div>
 
@@ -76,7 +81,7 @@ export default function SignUpPage() {
         {awaitingConfirmation ? (
           <div className="notice">
             <Mark>✓</Mark>
-            <p><b>Check your email.</b> We sent a confirmation link to {email}. Confirm your address, then <Link href="/signin">sign in</Link>.</p>
+            <p><b>Check your email.</b> NaijaVision sent a confirmation link to {email}. Confirm your address, then <Link href="/signin?next=/dashboard">sign in</Link>.</p>
           </div>
         ) : (
           <>
@@ -102,7 +107,7 @@ export default function SignUpPage() {
             {message && <p className="auth-message">{message}</p>}
 
             <div className="footer-actions">
-              <Link className="secondary" href="/signin">Already have an account?</Link>
+          <Link className="secondary" href="/signin?next=/dashboard">Already have an account?</Link>
               <button className="primary" disabled={loading || !email.trim() || !passwordsMatch} onClick={handleSignUp}>
                 {loading ? "Creating account…" : "Create account"}
               </button>
