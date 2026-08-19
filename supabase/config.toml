@@ -2,22 +2,31 @@ project_id = "naijavision"
 
 [api]
 enabled = true
-schemas = ["public", "storage", "graphql_public"]
+schemas = ["public", "graphql_public"]
 extra_search_path = ["public", "extensions"]
 
 [auth]
 enabled = true
-site_url = "http://localhost:3000"
-additional_redirect_urls = ["http://localhost:3000"]
+site_url = "https://judith989.github.io/NaijaVision/"
+additional_redirect_urls = [
+  "https://judith989.github.io/NaijaVision/**",
+  "http://localhost:3000/**"
+]
 enable_signup = true
 
 [auth.email]
 enable_signup = true
 enable_confirmations = true
+max_frequency = "1m"
+otp_length = 8
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
 
 [storage]
 enabled = true
-file_size_limit = "100MiB"
+file_size_limit = "50MiB"
 
 [functions.tokenize-payout-account]
 verify_jwt = true
