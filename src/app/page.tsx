@@ -252,7 +252,8 @@ export default function Home() {
             accountNumber: savedPayout.account_last4,
           }));
           setBankVerified(true);
-          setStep("study");
+          if (activeSubmission) openCalibration("record");
+          else setStep("study");
         } else {
           if (savedPayout) {
             setSavedAccountLast4(savedPayout.account_last4);
@@ -1190,6 +1191,17 @@ export default function Home() {
     setPreview(null);
   }
 
+  function selectPrompt(index: number) {
+    if (recording || savingRecording) {
+      setToast("Stop or finish saving the current recording before changing prompts.");
+      setTimeout(() => setToast(""), 2500);
+      return;
+    }
+    if (preview && !window.confirm("Discard the recording preview and open another prompt?")) return;
+    if (preview) redo();
+    setPromptIndex(index);
+  }
+
   const routeOrder: Step[] = ["account", "study", "consent", "profile", "calibrate", "record", "review", "complete"];
   const activeIndex = routeOrder.indexOf(step);
   const navLabel = step === "reviewer" ? "Reviewer workspace" : step === "welcome" ? "Open research contribution" : "Participant session";
@@ -1467,7 +1479,7 @@ export default function Home() {
             <div className="progress"><i style={{ width: `${progress}%` }} /></div>
             <div className="earnings-row"><small>Estimated compensation</small><b>{estimatedCompensation.amount} {estimatedCompensation.currency}</b></div>
 
-            <div className="prompt-list">{prompts.map((p, i) => <div key={p.id} className={`${i === promptIndex ? "current" : ""} ${clips.some((c) => c.promptId === p.id) ? "done" : ""}`}><span>{clips.some((c) => c.promptId === p.id) ? "✓" : i + 1}</span><div><b>{p.type}</b><small>{p.language}</small></div></div>)}</div>
+            <div className="prompt-list">{prompts.map((p, i) => { const completed = clips.some((c) => c.promptId === p.id); return <button type="button" key={p.id} aria-current={i === promptIndex ? "step" : undefined} onClick={() => selectPrompt(i)} className={`${i === promptIndex ? "current" : ""} ${completed ? "done" : ""}`}><span>{completed ? "✓" : i + 1}</span><div><b>{p.type}</b><small>{p.language}</small></div></button>; })}</div>
             <button className="secondary full" disabled={!clips.length} onClick={() => setStep("review")}>Review recordings ({clips.length})</button>
 
             <div className="quick-actions">
