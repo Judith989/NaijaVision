@@ -28,9 +28,10 @@ export async function uploadRecording(
   const projectId = projectHost.split(".")[0];
   const objectName = `${userId}/${submissionId}/${recordingId}.webm`;
   const contentType = (blob.type || "video/webm").split(";", 1)[0].trim().toLowerCase();
+  const uploadBlob = blob.type === contentType ? blob : new Blob([blob], { type: contentType });
 
   await new Promise<void>((resolve, reject) => {
-    const upload = new tus.Upload(blob, {
+    const upload = new tus.Upload(uploadBlob, {
       endpoint: `https://${projectId}.storage.supabase.co/storage/v1/upload/resumable`,
       retryDelays: [0, 1000, 3000, 5000, 10000, 20000],
       headers: {
