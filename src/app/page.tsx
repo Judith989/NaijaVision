@@ -231,27 +231,37 @@ export default function Home() {
       const role = await getCurrentRole();
       setCurrentRole(role);
       if (requestedMode.get("contribute") === "1") {
-        const { data: activeSubmission } = await supabase
+        const { data: latestSubmission } = await supabase
           .from("submissions")
           .select("id,status,survey_id,consent_id")
-          .not("status", "in", "(paid,rejected,withdrawn)")
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
         const resumableStatuses = ["draft", "recording", "uploading", "changes_requested", "resubmitted"];
-        if (activeSubmission && !resumableStatuses.includes(activeSubmission.status)) {
+        const activeSubmission = latestSubmission && resumableStatuses.includes(latestSubmission.status) ? latestSubmission : null;
+        const awaitingDecisionStatuses = ["submitted", "automated_qc", "awaiting_review", "payment_eligible", "payment_processing"];
+        if (latestSubmission && awaitingDecisionStatuses.includes(latestSubmission.status)) {
           window.location.replace(`${BASE_PATH}/dashboard#review-status`);
           return;
         }
-        if (activeSubmission) {
-          const [{ data: savedSurvey }, { data: savedConsent }] = await Promise.all([
-            supabase.from("surveys").select("responses").eq("id", activeSubmission.survey_id).maybeSingle(),
-            supabase.from("consents").select("safe_speech_opt_in").eq("id", activeSubmission.consent_id).maybeSingle(),
+        let savedResponses: Record<string, unknown> | null = null;
+        let savedConsent: { safe_speech_opt_in: boolean; consent_version_id: string } | null = null;
+        if (latestSubmission) {
+          const [{ data: savedSurvey }, { data: savedConsentRow }] = await Promise.all([
+            supabase.from("surveys").select("responses").eq("id", latestSubmission.survey_id).maybeSingle(),
+            supabase.from("consents").select("safe_speech_opt_in,consent_version_id").eq("id", latestSubmission.consent_id).maybeSingle(),
           ]);
-          if (savedSurvey?.responses) setProfile((current) => ({ ...current, ...savedSurvey.responses }));
-          if (savedConsent) setHarmful(Boolean(savedConsent.safe_speech_opt_in));
+          savedResponses = savedSurvey?.responses || null;
+          savedConsent = savedConsentRow;
+          if (savedResponses) setProfile((current) => ({ ...current, ...savedResponses }));
+          if (savedConsent) {
+            setHarmful(Boolean(savedConsent.safe_speech_opt_in));
+            setConsent({ adult: true, informed: true, publicUse: true });
+          }
+        }
+        if (activeSubmission) {
           setSubmissionId(activeSubmission.id);
-          await hydrateSubmissionRecordings(activeSubmission.id, activeSubmission.status, savedSurvey?.responses?.code || profile.code);
+          await hydrateSubmissionRecordings(activeSubmission.id, activeSubmission.status, String(savedResponses?.code || profile.code));
         }
         const { data: savedPayout } = await supabase
           .from("payout_accounts")
@@ -269,7 +279,34 @@ export default function Home() {
           }));
           setBankVerified(true);
           if (activeSubmission) openCalibration("record");
-          else setStep("study");
+          else if (latestSubmission && ["paid", "rejected", "withdrawn"].includes(latestSubmission.status) && savedResponses && savedConsent) {
+            const { data: activeVersion } = await supabase.from("consent_versions").select("id").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle();
+            if (!activeVersion || activeVersion.id !== savedConsent.consent_version_id) {
+              setStep("study");
+            } else {
+              const savedProfile = savedResponses as typeof profile;
+              const savedLanguages = Array.from(new Set([
+                savedProfile.primary,
+                savedProfile.homeLanguage,
+                savedProfile.workLanguage,
+                ...(savedProfile.nativeLanguages || []),
+                ...(savedProfile.otherLanguages || []),
+                ...(savedProfile.dailyLanguages || []),
+              ].filter(Boolean)));
+              const { data: newSubmissionId, error: startError } = await supabase.rpc("begin_submission", {
+                p_consent_version_id: activeVersion.id,
+                p_safe_speech_opt_in: savedConsent.safe_speech_opt_in,
+                p_survey: savedProfile,
+                p_languages: savedLanguages,
+              });
+              if (startError) setToast(startError.message);
+              else {
+                setSubmissionId(newSubmissionId);
+                setPromptIndex(0);
+                openCalibration("record");
+              }
+            }
+          } else setStep("study");
         } else {
           if (savedPayout) {
             setSavedAccountLast4(savedPayout.account_last4);
