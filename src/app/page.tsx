@@ -553,7 +553,7 @@ export default function Home() {
     const payload = {
       object_path: objectPath,
       checksum_sha256: checksum,
-      content_type: clip.blob.type || "video/webm",
+      content_type: (clip.blob.type || "video/webm").split(";", 1)[0].trim().toLowerCase(),
       file_size: clip.blob.size,
       duration_seconds: clip.duration,
       language: clip.language,

@@ -27,6 +27,7 @@ export async function uploadRecording(
   const projectHost = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!).host;
   const projectId = projectHost.split(".")[0];
   const objectName = `${userId}/${submissionId}/${recordingId}.webm`;
+  const contentType = (blob.type || "video/webm").split(";", 1)[0].trim().toLowerCase();
 
   await new Promise<void>((resolve, reject) => {
     const upload = new tus.Upload(blob, {
@@ -41,7 +42,7 @@ export async function uploadRecording(
       metadata: {
         bucketName: "raw-recordings",
         objectName,
-        contentType: blob.type || "video/webm",
+        contentType,
         cacheControl: "no-store",
       },
       onError: reject,
