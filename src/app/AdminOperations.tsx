@@ -17,6 +17,9 @@ export function AdminOperations() {
   const [releaseVersion, setReleaseVersion] = useState("");
   const [staffRequests, setStaffRequests] = useState<Row[]>([]);
   const [staffMembers, setStaffMembers] = useState<Row[]>([]);
+  const [pendingSubmissions, setPendingSubmissions] = useState<Row[]>([]);
+  const [reviewerAssignments, setReviewerAssignments] = useState<Record<string, string>>({});
+  const [activePolicy, setActivePolicy] = useState<Row | null>(null);
   const [participantQuery, setParticipantQuery] = useState("");
   const [participants, setParticipants] = useState<Row[]>([]);
   const [message, setMessage] = useState("");
@@ -24,7 +27,7 @@ export function AdminOperations() {
   async function refresh() {
     const supabase = getSupabase();
     if (!supabase) return;
-    const [withdrawalResult, riskResult, paymentResult, auditResult, releaseResult, staffRequestResult, staffMemberResult] = await Promise.all([
+    const [withdrawalResult, riskResult, paymentResult, auditResult, releaseResult, staffRequestResult, staffMemberResult, submissionResult, policyResult] = await Promise.all([
       supabase.from("withdrawal_requests").select("*").in("status", ["requested", "processing"]).order("requested_at"),
       supabase.from("risk_flags").select("*").eq("status", "open").order("score", { ascending: false }),
       supabase.from("payments").select("id,submission_id,amount,currency,status,created_at").in("status", ["eligible", "processing", "failed"]).order("created_at"),
@@ -32,6 +35,8 @@ export function AdminOperations() {
       supabase.from("dataset_releases").select("*").order("created_at", { ascending: false }),
       supabase.from("profiles").select("user_id,display_name,participant_id,created_at").eq("staff_request_status", "pending").eq("role", "participant").order("created_at"),
       supabase.from("profiles").select("user_id,display_name,participant_id,role,account_status,updated_at").in("role", ["reviewer", "admin"]).order("role").order("display_name"),
+      supabase.from("submissions").select("id,participant_id,status,expected_recordings,assigned_reviewer_id,created_at").in("status", ["automated_qc", "awaiting_review", "resubmitted"]).order("created_at"),
+      supabase.from("compensation_policies").select("id,amount,currency,effective_at").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
     setWithdrawals(withdrawalResult.data || []);
     setRisks(riskResult.data || []);
@@ -40,6 +45,8 @@ export function AdminOperations() {
     setReleases(releaseResult.data || []);
     setStaffRequests(staffRequestResult.data || []);
     setStaffMembers(staffMemberResult.data || []);
+    setPendingSubmissions(submissionResult.data || []);
+    setActivePolicy(policyResult.data || null);
   }
 
   async function searchParticipants() {
@@ -94,15 +101,30 @@ export function AdminOperations() {
 
   async function createPolicy() {
     const supabase = getSupabase();
-    const { error } = await supabase!.from("compensation_policies").insert({
-      name: `Policy ${new Date().toISOString()}`,
-      amount: Number(amount),
-      currency,
-      minimum_accepted_recordings: 69,
-      partial_payment_allowed: false,
-      effective_at: new Date().toISOString(),
-    });
-    setMessage(error ? error.message : "Compensation policy created.");
+    const numericAmount = Number(amount);
+    if (!amount || Number.isNaN(numericAmount) || numericAmount < 0) {
+      setMessage("Enter a valid participant compensation amount.");
+      return;
+    }
+    if (!window.confirm(`Replace the active participant compensation policy with ${numericAmount} ${currency} per fully approved submission?`)) return;
+    const { error } = await supabase!.rpc("replace_compensation_policy", { p_amount: numericAmount, p_currency: currency });
+    setMessage(error ? error.message : "Participant compensation policy updated.");
+    if (!error) {
+      setAmount("");
+      refresh();
+    }
+  }
+
+  async function assignSubmission(submissionId: string) {
+    const reviewerId = reviewerAssignments[submissionId];
+    if (!reviewerId) {
+      setMessage("Select a reviewer first.");
+      return;
+    }
+    const supabase = getSupabase();
+    const { error } = await supabase!.rpc("assign_submission", { p_submission_id: submissionId, p_reviewer_id: reviewerId });
+    setMessage(error ? error.message : "Submission assigned to the reviewer.");
+    if (!error) refresh();
   }
 
   async function completeWithdrawal(id: string, submissionId: string) {
@@ -145,10 +167,11 @@ export function AdminOperations() {
     <div className="section-head"><div><div className="eyebrow">Administrator controls</div><h2>Operations and governance</h2></div></div>
     {message && <p className="auth-message">{message}</p>}
     <div className="ops-grid">
-      <div className="ops-card"><h3>Pending staff requests</h3>{staffRequests.length ? staffRequests.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} · {String(row.participant_id)}</span><button onClick={() => approveStaffRequest(String(row.user_id), "reviewer")}>Make reviewer</button><button onClick={() => approveStaffRequest(String(row.user_id), "admin")}>Make admin</button><button onClick={() => dismissStaffRequest(String(row.user_id))}>Dismiss</button></div>) : <p>No pending requests.</p>}</div>
-      <div className="ops-card"><h3>Current staff</h3><p className="ops-hint">Reviewers validate media. Administrators can also manage staff, payments, governance, and releases.</p>{staffMembers.length ? staffMembers.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} · {String(row.participant_id)} · {String(row.role)}</span>{row.role === "reviewer" ? <button onClick={() => changeStaffRole(String(row.user_id), "admin")}>Make admin</button> : <button onClick={() => changeStaffRole(String(row.user_id), "reviewer")}>Make reviewer</button>}<button onClick={() => changeStaffRole(String(row.user_id), "participant")}>Remove staff access</button></div>) : <p>No staff accounts found.</p>}</div>
-      <div className="ops-card"><h3>Recruit a participant</h3><p className="ops-hint">Promote an existing contributor to reviewer or admin.</p><input value={participantQuery} onChange={(event) => setParticipantQuery(event.target.value)} placeholder="Search by name or participant ID" /><button className="primary" onClick={searchParticipants}>Search</button>{participants.length ? participants.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} · {String(row.participant_id)}</span><button onClick={() => promoteParticipant(String(row.user_id), "reviewer")}>Make reviewer</button><button onClick={() => promoteParticipant(String(row.user_id), "admin")}>Make admin</button></div>) : <p>No participants found.</p>}</div>
-      <div className="ops-card"><h3>Compensation policy</h3><input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Full-session amount" /><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option>NGN</option><option>GHS</option><option>USD</option><option>GBP</option><option>EUR</option></select><button className="primary" onClick={createPolicy}>Create policy</button></div>
+      <div className="ops-card"><h3>Pending access requests</h3><p className="ops-hint">A request is not a separate staff role. Approve it as reviewer or administrator.</p>{staffRequests.length ? staffRequests.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} | {String(row.participant_id)}</span><button onClick={() => approveStaffRequest(String(row.user_id), "reviewer")}>Make reviewer</button><button onClick={() => approveStaffRequest(String(row.user_id), "admin")}>Make admin</button><button onClick={() => dismissStaffRequest(String(row.user_id))}>Dismiss</button></div>) : <p>No pending requests.</p>}</div>
+      <div className="ops-card"><h3>Reviewers and administrators</h3><p className="ops-hint">Reviewers assess assigned media. Administrators assign work, make final decisions, manage payments, and control releases.</p>{staffMembers.length ? staffMembers.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} | {String(row.participant_id)} | {String(row.role)}</span>{row.role === "reviewer" ? <button onClick={() => changeStaffRole(String(row.user_id), "admin")}>Make admin</button> : <button onClick={() => changeStaffRole(String(row.user_id), "reviewer")}>Make reviewer</button>}<button onClick={() => changeStaffRole(String(row.user_id), "participant")}>Remove access</button></div>) : <p>No reviewer or administrator accounts found.</p>}</div>
+      <div className="ops-card"><h3>Add a reviewer or administrator</h3><p className="ops-hint">Find an existing participant account, then grant the appropriate role.</p><input value={participantQuery} onChange={(event) => setParticipantQuery(event.target.value)} placeholder="Search by name or participant ID" /><button className="primary" onClick={searchParticipants}>Search</button>{participants.length ? participants.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} | {String(row.participant_id)}</span><button onClick={() => promoteParticipant(String(row.user_id), "reviewer")}>Make reviewer</button><button onClick={() => promoteParticipant(String(row.user_id), "admin")}>Make admin</button></div>) : <p>No participants found.</p>}</div>
+      <div className="ops-card"><h3>Participant compensation policy</h3><p className="ops-hint">This is the amount owed for one complete participant submission after reviewer recommendation and administrator approval. It does not pay reviewers.</p>{activePolicy && <p><b>Current:</b> {String(activePolicy.amount)} {String(activePolicy.currency)}</p>}<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Amount per approved submission" /><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option>NGN</option><option>GHS</option><option>USD</option><option>GBP</option><option>EUR</option></select><button className="primary" onClick={createPolicy}>Replace active policy</button></div>
+      <div className="ops-card wide-ops-card"><h3>Submission assignments</h3><p className="ops-hint">Assign each pending submission to a reviewer. Reviewers only see submissions assigned to them.</p>{pendingSubmissions.length ? pendingSubmissions.map((row) => <div className="ops-row assignment-row" key={String(row.id)}><span>{String(row.participant_id)} | {String(row.status)} | {String(row.expected_recordings)} recordings</span><select value={reviewerAssignments[String(row.id)] || String(row.assigned_reviewer_id || "")} onChange={(event) => setReviewerAssignments((current) => ({ ...current, [String(row.id)]: event.target.value }))}><option value="">Select reviewer</option>{staffMembers.filter((member) => member.role === "reviewer").map((member) => <option key={String(member.user_id)} value={String(member.user_id)}>{String(member.display_name || member.participant_id)}</option>)}</select><button onClick={() => assignSubmission(String(row.id))}>{row.assigned_reviewer_id ? "Reassign" : "Assign"}</button></div>) : <p>No submissions need assignment.</p>}</div>
       <div className="ops-card"><h3>Dataset release</h3><input value={releaseName} onChange={(event) => setReleaseName(event.target.value)} placeholder="Dataset name" /><input value={releaseVersion} onChange={(event) => setReleaseVersion(event.target.value)} placeholder="Version, e.g. 1.0" /><button className="primary" disabled={!releaseVersion} onClick={createRelease}>Create release draft</button></div>
     </div>
     <div className="ops-grid">

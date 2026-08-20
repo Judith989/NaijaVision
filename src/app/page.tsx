@@ -168,14 +168,16 @@ export default function Home() {
   const [promptIssueSending, setPromptIssueSending] = useState(false);
   const [savingRecording, setSavingRecording] = useState(false);
   const [redoPromptIds, setRedoPromptIds] = useState<string[] | null>(null);
-  const [submissionStatus, setSubmissionStatus] = useState<"draft" | "pending-review">("draft");
   const [reviewStatus, setReviewStatus] = useState<"pending" | "approved" | "changes-requested" | "declined">("pending");
   const [paymentStatus, setPaymentStatus] = useState<"not-eligible" | "eligible" | "approved">("not-eligible");
   const [reviewMedia, setReviewMedia] = useState("");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [submissionId, setSubmissionId] = useState("");
-  const [reviewQueue, setReviewQueue] = useState<Array<{ id: string; participant_id: string; status: string; expected_recordings: number; created_at: string }>>([]);
+  const [reviewQueue, setReviewQueue] = useState<Array<{ id: string; participant_id: string; status: string; expected_recordings: number; created_at: string; assigned_reviewer_id: string | null }>>([]);
   const [selectedReviewId, setSelectedReviewId] = useState("");
+  const [reviewRecommendation, setReviewRecommendation] = useState<{ recommendation: "approved" | "rejected" | "changes_requested"; comments: string } | null>(null);
+  const [reviewComments, setReviewComments] = useState("");
+  const [adminWorkspaceView, setAdminWorkspaceView] = useState<"reviews" | "operations">("reviews");
   const [reviewerRecords, setReviewerRecords] = useState<Array<{ id: string; prompt_id: string; language: string; duration_seconds: number; quality_status: string; object_path: string; signed_url: string }>>([]);
   const [localRecordingReviews, setLocalRecordingReviews] = useState<Record<string, "approved" | "rejected" | "changes_requested">>({});
   const [withdrawalReason, setWithdrawalReason] = useState("");
@@ -304,15 +306,16 @@ export default function Home() {
     if (step !== "reviewer") return;
     const supabase = getSupabase();
     if (!supabase) return;
-    supabase.from("submissions")
-      .select("id,participant_id,status,expected_recordings,created_at")
+    let query = supabase.from("submissions")
+      .select("id,participant_id,status,expected_recordings,created_at,assigned_reviewer_id")
       .in("status", ["automated_qc", "awaiting_review", "resubmitted", "payment_eligible", "payment_processing"])
-      .order("created_at", { ascending: true })
-      .then(({ data }) => {
+      .order("created_at", { ascending: true });
+    if (currentRole === "reviewer" && authenticatedUserId) query = query.eq("assigned_reviewer_id", authenticatedUserId);
+    query.then(({ data }) => {
         const queue = data || [];
         setReviewQueue(queue);
       });
-  }, [step, selectedReviewId]);
+  }, [step, selectedReviewId, currentRole, authenticatedUserId]);
   useEffect(() => {
     if (!backendConfigured || !selectedReviewId) return;
     const supabase = getSupabase();
@@ -336,6 +339,16 @@ export default function Home() {
         }));
         setReviewerRecords(signed);
       });
+  }, [selectedReviewId]);
+  useEffect(() => {
+    if (!backendConfigured || !selectedReviewId) return;
+    const supabase = getSupabase();
+    if (!supabase) return;
+    supabase.from("submission_recommendations")
+      .select("recommendation,comments")
+      .eq("submission_id", selectedReviewId)
+      .maybeSingle()
+      .then(({ data }) => setReviewRecommendation(data as typeof reviewRecommendation));
   }, [selectedReviewId]);
   useEffect(() => {
     if (step !== "complete" || !submissionId || !backendConfigured) return;
@@ -785,7 +798,6 @@ export default function Home() {
   async function uploadAndFinalizeSubmission() {
     const supabase = getSupabase();
     if (!supabase || !authenticatedUserId || !submissionId) {
-      setSubmissionStatus("pending-review");
       localStorage.removeItem("naijavision-contribution-draft");
       setHasDraft(false);
       setStep("complete");
@@ -812,7 +824,6 @@ export default function Home() {
       setToast(manualQueueError ? "Submission uploaded. Quality control needs administrator attention." : "Submission uploaded and queued for human review.");
     }
     setUploadProgress(100);
-    setSubmissionStatus("pending-review");
     localStorage.removeItem("naijavision-contribution-draft");
     setHasDraft(false);
     setStep("complete");
@@ -837,6 +848,22 @@ export default function Home() {
     }
     setReviewQueue((queue) => queue.filter((item) => item.id !== target));
     setSelectedReviewId("");
+  }
+
+  async function submitReviewRecommendation(recommendation: "approved" | "rejected" | "changes_requested") {
+    const supabase = getSupabase();
+    if (!supabase || !selectedReviewId) return;
+    const { error } = await supabase.rpc("submit_review_recommendation", {
+      p_submission_id: selectedReviewId,
+      p_recommendation: recommendation,
+      p_comments: reviewComments || null,
+    });
+    if (error) {
+      setToast(error.message);
+      return;
+    }
+    setReviewRecommendation({ recommendation, comments: reviewComments });
+    setToast("Recommendation sent to an administrator for the final decision.");
   }
 
   async function reviewRecording(recordingId: string, decision: "approved" | "rejected" | "changes_requested") {
@@ -864,13 +891,15 @@ export default function Home() {
 
   async function selectReviewerSubmission(id: string) {
     const supabase = getSupabase();
-    if (supabase) {
+    if (supabase && currentRole === "reviewer") {
       const { error } = await supabase.rpc("claim_submission", { p_submission_id: id });
       if (error && !error.message.toLowerCase().includes("assigned")) {
         setToast(error.message);
         return;
       }
     }
+    setReviewComments("");
+    setReviewRecommendation(null);
     setSelectedReviewId(id);
   }
 
@@ -1239,11 +1268,11 @@ export default function Home() {
         </button>
         <div className="top-context"><span className="privacy-dot" /> {navLabel}</div>
         {currentRole === "reviewer" || currentRole === "admin" ? (
-          <>
+          <nav className="workspace-nav" aria-label="Account navigation">
             <Link className="admin-link" href="/dashboard">Dashboard</Link>
-            <button className="admin-link" onClick={() => setStep(step === "reviewer" ? "welcome" : "reviewer")}>{step === "reviewer" ? "Participant site" : "Reviewer workspace"}</button>
+            <button className="admin-link" onClick={() => setStep(step === "reviewer" ? "welcome" : "reviewer")}>{step === "reviewer" ? "Recording site" : "Review workspace"}</button>
             {backendConfigured && <button className="admin-link" onClick={handleStaffSignOut}>Sign out</button>}
-          </>
+          </nav>
         ) : authenticatedUserId ? (
           <div className="nav-auth-links">
             <Link className="admin-link" href="/dashboard">Dashboard</Link>
@@ -1594,22 +1623,27 @@ export default function Home() {
 
       {step === "reviewer" && (
         <section className="admin-shell">
-          <div className="admin-title"><div><div className="eyebrow">Human validation and compensation</div><h1>Reviewer workspace</h1><p>Review submitted media before approving data and releasing compensation.</p></div><span className={`status ${submissionStatus === "pending-review" ? "needs-review" : "accepted"}`}>{submissionStatus === "pending-review" ? "Pending review" : "No submitted session"}</span></div>
-          {backendConfigured && <div className="review-queue"><h3>Assigned and available submissions</h3>{reviewQueue.length ? reviewQueue.map((item) => <button key={item.id} className={selectedReviewId === item.id ? "selected" : ""} onClick={() => selectReviewerSubmission(item.id)}><b>{item.participant_id}</b><small>{item.status} · {item.expected_recordings} recordings · {new Date(item.created_at).toLocaleDateString()}</small></button>) : <p>No submissions are currently awaiting action.</p>}</div>}
-          <div className="metric-grid"><div><span>Participant</span><b className="small-metric">{profile.code}</b><small>pseudonymous ID</small></div><div><span>Recordings</span><b>{clips.length}</b><small>of {prompts.length} expected</small></div><div><span>Validation</span><b className="small-metric">{reviewStatus}</b><small>human decision</small></div><div><span>Payment</span><b className="small-metric">{paymentStatus}</b><small>separate operational record</small></div></div>
+          <div className="admin-title"><div><div className="eyebrow">Human validation</div><h1>{currentRole === "admin" ? "Review and administration" : "Reviewer workspace"}</h1><p>Review submitted media and send a documented recommendation. Administrators make final decisions and control compensation.</p></div></div>
+          {currentRole === "admin" && <div className="workspace-tabs"><button className={adminWorkspaceView === "reviews" ? "active" : ""} onClick={() => setAdminWorkspaceView("reviews")}>Submission reviews</button><button className={adminWorkspaceView === "operations" ? "active" : ""} onClick={() => setAdminWorkspaceView("operations")}>Administration</button></div>}
+          {(currentRole !== "admin" || adminWorkspaceView === "reviews") && <>
+          {backendConfigured && <div className="review-queue"><h3>{currentRole === "admin" ? "Pending and active submissions" : "Submissions assigned to you"}</h3>{reviewQueue.length ? reviewQueue.map((item) => <button key={item.id} className={selectedReviewId === item.id ? "selected" : ""} onClick={() => selectReviewerSubmission(item.id)}><b>{item.participant_id}</b><small>{item.status} | {item.expected_recordings} recordings | {new Date(item.created_at).toLocaleDateString()}</small></button>) : <p>{currentRole === "admin" ? "No submissions are awaiting action." : "No submissions are assigned to you yet."}</p>}</div>}
+          {selectedReviewId ? <>
+          <div className="metric-grid"><div><span>Participant</span><b className="small-metric">{reviewQueue.find((item) => item.id === selectedReviewId)?.participant_id || "Unknown"}</b><small>pseudonymous ID</small></div><div><span>Recordings</span><b>{reviewerRecords.length}</b><small>of {reviewQueue.find((item) => item.id === selectedReviewId)?.expected_recordings || 0} expected</small></div><div><span>Recommendation</span><b className="small-metric">{reviewRecommendation?.recommendation.replaceAll("_", " ") || "Pending"}</b><small>reviewer assessment</small></div><div><span>Final decision</span><b className="small-metric">{reviewQueue.find((item) => item.id === selectedReviewId)?.status.replaceAll("_", " ")}</b><small>administrator controlled</small></div></div>
           <div className="data-card">
             <div className="table-head"><div><h3>Submission media</h3><p>Check prompt accuracy, mouth-only framing, audio quality, duplicates, and private information.</p></div></div>
             <div className="table-wrap"><table><thead><tr><th>Prompt</th><th>Language</th><th>Type</th><th>Duration</th><th>Quality</th><th>Media</th><th>Decision</th></tr></thead><tbody>{backendConfigured ? reviewerRecords.map((record) => <tr key={record.id}><td><b>{record.prompt_id}</b></td><td>{record.language}</td><td>{prompts.find((prompt) => prompt.id === record.prompt_id)?.type}</td><td>{Number(record.duration_seconds).toFixed(1)}s</td><td><span className="status needs-review">{record.quality_status}</span></td><td><button className="download" disabled={!record.signed_url} onClick={() => setReviewMedia(record.signed_url)}>Watch</button></td><td><div className="recording-decisions"><button className="download" onClick={() => reviewRecording(record.id, "approved")}>Approve</button><button className="download danger" onClick={() => reviewRecording(record.id, "rejected")}>Decline</button><button className="download redo" onClick={() => reviewRecording(record.id, "changes_requested")}>Redo</button></div></td></tr>) : clips.map((clip) => { const decision = localRecordingReviews[clip.id]; return <tr key={clip.id}><td><b>{clip.promptId}</b><small>{clip.transcript}</small></td><td>{clip.language}</td><td>{prompts.find((prompt) => prompt.id === clip.promptId)?.type}</td><td>{clip.duration.toFixed(1)}s</td><td><span className={`status ${decision || clip.status}`}>{decision === "approved" ? "approved" : decision === "rejected" ? "declined" : decision === "changes_requested" ? "redo requested" : clip.status}</span></td><td><button className="download" onClick={() => { if (reviewMedia) URL.revokeObjectURL(reviewMedia); setReviewMedia(URL.createObjectURL(clip.blob)); }}>Watch</button></td><td><div className="recording-decisions"><button className="download" onClick={() => reviewRecording(clip.id, "approved")}>Approve</button><button className="download danger" onClick={() => reviewRecording(clip.id, "rejected")}>Decline</button><button className="download redo" onClick={() => reviewRecording(clip.id, "changes_requested")}>Redo</button></div></td></tr>; })}</tbody></table></div>
           </div>
           {reviewMedia && <div className="reviewer-media"><video src={reviewMedia} controls autoPlay playsInline /></div>}
-          <div className="payout-details">
+          {currentRole === "admin" && <div className="payout-details">
             <div><small>Bank country</small><b>{account.payoutCountry}</b></div>
             <div><small>Bank name</small><b>{account.bankName || "Not provided"}</b></div>
             <div><small>Account name</small><b>{account.accountName || "Not provided"}</b></div>
             <div><small>Account number</small><b>{account.accountNumber || "Not provided"}</b></div>
-          </div>
-          <div className="review-decision"><div><h3>Participant submission decision</h3><p>Approve the complete submission, decline it, or return it to the participant for specific recordings to be redone. Payment becomes eligible only after approval.</p></div><button className="secondary" onClick={() => makeReviewDecision("changes_requested")}>Return for redo</button><button className="secondary danger-border" onClick={() => { if (window.confirm("Decline this participant's complete submission? This makes it ineligible for payment.")) makeReviewDecision("rejected"); }}>Decline submission</button><button className="primary" onClick={() => makeReviewDecision("approved")}>Approve submission</button>{currentRole === "admin" || !backendConfigured ? <button className="primary payment" disabled={!backendConfigured && paymentStatus !== "eligible"} onClick={approvePayment}>Approve payment</button> : null}</div>
-          {(currentRole === "admin" || !backendConfigured) && <AdminOperations />}
+          </div>}
+          {currentRole === "reviewer" ? <div className="review-decision recommendation-panel"><div><h3>Reviewer recommendation</h3><p>Review every recording, add useful notes, then send your recommendation to an administrator. This does not approve payment.</p><textarea value={reviewComments} onChange={(event) => setReviewComments(event.target.value)} placeholder="Explain quality problems, redo instructions, or reasons for your recommendation" /></div><button className="secondary" onClick={() => submitReviewRecommendation("changes_requested")}>Recommend redo</button><button className="secondary danger-border" onClick={() => submitReviewRecommendation("rejected")}>Recommend decline</button><button className="primary" onClick={() => submitReviewRecommendation("approved")}>Recommend approval</button></div> : <div className="review-decision"><div><h3>Administrator final decision</h3><p>{reviewRecommendation ? `Reviewer recommendation: ${reviewRecommendation.recommendation.replaceAll("_", " ")}. ${reviewRecommendation.comments || "No reviewer comments."}` : "A reviewer recommendation is required before the final decision."}</p></div><button className="secondary" disabled={!reviewRecommendation} onClick={() => makeReviewDecision("changes_requested")}>Return for redo</button><button className="secondary danger-border" disabled={!reviewRecommendation} onClick={() => { if (window.confirm("Decline this participant's complete submission? This makes it ineligible for payment.")) makeReviewDecision("rejected"); }}>Decline submission</button><button className="primary" disabled={!reviewRecommendation} onClick={() => makeReviewDecision("approved")}>Final approval</button><button className="primary payment" onClick={approvePayment}>Process payment</button></div>}
+          </> : <div className="empty-workspace"><h3>Select a submission</h3><p>Choose an item from the queue to inspect its recordings and review history.</p></div>}
+          </>}
+          {currentRole === "admin" && adminWorkspaceView === "operations" && <AdminOperations />}
         </section>
       )}
 
