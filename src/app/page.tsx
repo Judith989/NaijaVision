@@ -20,6 +20,8 @@ type Clip = {
   status: "accepted" | "needs-review";
   metadata?: Record<string, string | number | boolean | null>;
   blob: Blob;
+  backendRecordingId?: string;
+  objectPath?: string;
 };
 
 const languages = ["Igbo", "Yorùbá", "Hausa", "Nigerian Pidgin", "Nigerian English"];
@@ -150,6 +152,8 @@ export default function Home() {
   const [reportingPromptIssue, setReportingPromptIssue] = useState(false);
   const [promptIssueText, setPromptIssueText] = useState("");
   const [promptIssueSending, setPromptIssueSending] = useState(false);
+  const [savingRecording, setSavingRecording] = useState(false);
+  const [redoPromptIds, setRedoPromptIds] = useState<string[] | null>(null);
   const [submissionStatus, setSubmissionStatus] = useState<"draft" | "pending-review">("draft");
   const [reviewStatus, setReviewStatus] = useState<"pending" | "approved" | "changes-requested" | "declined">("pending");
   const [paymentStatus, setPaymentStatus] = useState<"not-eligible" | "eligible" | "approved">("not-eligible");
@@ -231,6 +235,7 @@ export default function Home() {
           if (savedSurvey?.responses) setProfile((current) => ({ ...current, ...savedSurvey.responses }));
           if (savedConsent) setHarmful(Boolean(savedConsent.safe_speech_opt_in));
           setSubmissionId(activeSubmission.id);
+          await hydrateSubmissionRecordings(activeSubmission.id, activeSubmission.status, savedSurvey?.responses?.code || profile.code);
         }
         const { data: savedPayout } = await supabase
           .from("payout_accounts")
@@ -365,7 +370,7 @@ export default function Home() {
       }
       return false;
     });
-    if (!harmful) return eligible;
+    if (!harmful) return redoPromptIds ? eligible.filter((prompt) => redoPromptIds.includes(prompt.id)) : eligible;
     const safeCombinations: Record<string, string[]> = {
       "SAFE-CS-001": ["Igbo", "Nigerian English"],
       "SAFE-CS-002": ["Yorùbá", "Nigerian Pidgin"],
@@ -376,8 +381,9 @@ export default function Home() {
       if (prompt.language !== "Code-switched") return selectedLanguages.has(prompt.language);
       return (safeCombinations[prompt.id] || []).every((language) => selectedLanguages.has(language));
     });
-    return [...eligible, ...safe];
-  }, [harmful, selectedLanguages]);
+    const allEligible = [...eligible, ...safe];
+    return redoPromptIds ? allEligible.filter((prompt) => redoPromptIds.includes(prompt.id)) : allEligible;
+  }, [harmful, selectedLanguages, redoPromptIds]);
   const assignedTasks = useMemo(() => Array.from(new Set([
     "Lip movement recording",
     ...prompts.map((prompt) => {
@@ -388,6 +394,11 @@ export default function Home() {
     }),
   ])), [prompts]);
   const current = prompts[promptIndex];
+  useEffect(() => {
+    if (step !== "record" || preview || !current || !clips.some((clip) => clip.promptId === current.id)) return;
+    const missingIndex = prompts.findIndex((prompt) => !clips.some((clip) => clip.promptId === prompt.id));
+    if (missingIndex >= 0 && missingIndex !== promptIndex) setPromptIndex(missingIndex);
+  }, [step, preview, current, clips, prompts, promptIndex]);
   const consentReady = Object.values(consent).every(Boolean);
   const acceptedCount = clips.filter((c) => c.status === "accepted").length;
   const progress = Math.min(100, (acceptedCount / prompts.length) * 100);
@@ -456,6 +467,143 @@ export default function Home() {
     setCalibrationMessage("Enable the camera and microphone to begin.");
     setCalibrationReturnStep(returnStep);
     setStep("calibrate");
+  }
+
+  async function hydrateSubmissionRecordings(activeId: string, status: string, sessionCode: string) {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    const { data: rows, error } = await supabase
+      .from("recordings")
+      .select("id,object_path,duration_seconds,language,original_transcript,quality_status,prompt_assignments(prompt_id)")
+      .eq("submission_id", activeId);
+    if (error) {
+      setToast("Saved recordings could not be loaded. Please refresh and try again.");
+      return;
+    }
+
+    if (status === "changes_requested") {
+      const { data: reviewRows } = await supabase
+        .from("reviews")
+        .select("recording_id,decision")
+        .eq("submission_id", activeId)
+        .in("decision", ["rejected", "changes_requested"]);
+      const redoRecordingIds = new Set((reviewRows || []).map((review: any) => review.recording_id));
+      const redoIds = (rows || [])
+        .filter((row: any) => redoRecordingIds.has(row.id))
+        .map((row: any) => row.prompt_assignments?.prompt_id)
+        .filter(Boolean);
+      const legacyFallbackIds = (rows || []).map((row: any) => row.prompt_assignments?.prompt_id).filter(Boolean);
+      setRedoPromptIds(redoIds.length ? redoIds : legacyFallbackIds);
+      setClips([]);
+      setPromptIndex(0);
+      return;
+    }
+
+    setRedoPromptIds(null);
+    const restored = await Promise.all((rows || []).map(async (row: any) => {
+      const { data: blob, error: downloadError } = await supabase.storage.from("raw-recordings").download(row.object_path);
+      if (downloadError || !blob) return null;
+      const promptId = row.prompt_assignments?.prompt_id || "";
+      const clip: Clip = {
+        id: row.id,
+        promptId,
+        transcript: row.original_transcript,
+        language: row.language,
+        duration: Number(row.duration_seconds),
+        createdAt: new Date().toISOString(),
+        status: row.quality_status === "needs-review" ? "needs-review" : "accepted",
+        metadata: { sessionId: sessionCode, humanValidationStatus: "pending" },
+        blob,
+        backendRecordingId: row.id,
+        objectPath: row.object_path,
+      };
+      await saveClip(clip);
+      return clip;
+    }));
+    setClips(restored.filter((clip): clip is Clip => Boolean(clip)));
+  }
+
+  async function persistAcceptedClip(clip: Clip): Promise<Clip> {
+    const supabase = getSupabase();
+    if (!supabase || !authenticatedUserId || !submissionId) return clip;
+    const { data: assignment, error: assignmentError } = await supabase
+      .from("prompt_assignments")
+      .select("id")
+      .eq("submission_id", submissionId)
+      .eq("prompt_id", clip.promptId)
+      .single();
+    if (assignmentError || !assignment) throw assignmentError || new Error(`No assignment for ${clip.promptId}`);
+
+    const { data: existing } = await supabase
+      .from("recordings")
+      .select("id,object_path")
+      .eq("submission_id", submissionId)
+      .eq("prompt_assignment_id", assignment.id)
+      .maybeSingle();
+    const newRecordingId = crypto.randomUUID();
+    const checksum = await sha256(clip.blob);
+    const objectPath = await uploadRecording(authenticatedUserId, submissionId, newRecordingId, clip.blob, ({ percentage }) => setUploadProgress(percentage));
+    const payload = {
+      object_path: objectPath,
+      checksum_sha256: checksum,
+      content_type: clip.blob.type || "video/webm",
+      file_size: clip.blob.size,
+      duration_seconds: clip.duration,
+      language: clip.language,
+      original_transcript: clip.transcript,
+      normalized_transcript: clip.transcript.toLocaleLowerCase(),
+      video_width: clip.metadata?.width || null,
+      video_height: clip.metadata?.height || null,
+      frame_rate: clip.metadata?.frameRate || null,
+      audio_sample_rate: clip.metadata?.audioSampleRate || null,
+      device_orientation: clip.metadata?.deviceOrientation || null,
+      browser: clip.metadata?.browser || null,
+      operating_system: clip.metadata?.operatingSystem || null,
+      device_category: clip.metadata?.deviceCategory || null,
+      device_model: clip.metadata?.deviceModel || null,
+      recording_location: clip.metadata?.recordingEnvironment || null,
+      lighting_condition: clip.metadata?.lightingCondition || null,
+      measured_light_level: clip.metadata?.measuredLightLevel || null,
+      estimated_noise: clip.metadata?.estimatedNoiseLevel || null,
+      snr_db: clip.metadata?.measuredSnrDb || null,
+      clipping_rate: clip.metadata?.clippingRate || null,
+      speaking_style: clip.metadata?.speakingStyle || null,
+      dialect: clip.metadata?.dialect || null,
+      language_sequence: clip.metadata?.codeSwitchLanguageSequence ? String(clip.metadata.codeSwitchLanguageSequence).split("+").map((value) => value.trim()) : [clip.language],
+      english_translation: clip.metadata?.englishTranslation || null,
+      quality_status: "pending",
+      human_validation_status: "pending",
+    };
+
+    const result = existing
+      ? await supabase.from("recordings").update(payload).eq("id", existing.id)
+      : await supabase.from("recordings").insert({
+          id: newRecordingId,
+          submission_id: submissionId,
+          user_id: authenticatedUserId,
+          prompt_assignment_id: assignment.id,
+          ...payload,
+        });
+    if (result.error) {
+      await supabase.storage.from("raw-recordings").remove([objectPath]);
+      throw result.error;
+    }
+    if (existing?.object_path && existing.object_path !== objectPath) {
+      await supabase.storage.from("raw-recordings").remove([existing.object_path]);
+    }
+    setUploadProgress(0);
+    return { ...clip, id: existing?.id || newRecordingId, backendRecordingId: existing?.id || newRecordingId, objectPath };
+  }
+
+  async function removeAcceptedClip(clip: Clip) {
+    const supabase = getSupabase();
+    if (supabase && clip.backendRecordingId) {
+      const { error } = await supabase.from("recordings").delete().eq("id", clip.backendRecordingId);
+      if (error) throw error;
+      if (clip.objectPath) await supabase.storage.from("raw-recordings").remove([clip.objectPath]);
+    }
+    await deleteClip(clip.id);
+    setClips((items) => items.filter((item) => item.id !== clip.id));
   }
 
   async function submitPromptIssue() {
@@ -626,57 +774,14 @@ export default function Home() {
       return;
     }
     setUploadProgress(1);
-    const { data: assignments, error: assignmentError } = await supabase
-      .from("prompt_assignments")
-      .select("id,prompt_id")
-      .eq("submission_id", submissionId);
-    if (assignmentError || !assignments) {
-      setToast(assignmentError?.message || "Prompt assignments could not be loaded.");
+    try {
+      for (const clip of clips) {
+        if (!clip.backendRecordingId) await persistAcceptedClip(clip);
+      }
+    } catch (uploadError) {
+      setUploadProgress(0);
+      setToast(uploadError instanceof Error ? uploadError.message : "A recording could not be uploaded.");
       return;
-    }
-    for (let index = 0; index < clips.length; index += 1) {
-      const clip = clips[index];
-      const assignment = assignments.find((item) => item.prompt_id === clip.promptId);
-      if (!assignment) throw new Error(`No assignment for ${clip.promptId}`);
-      const recordingId = crypto.randomUUID();
-      const checksum = await sha256(clip.blob);
-      const objectPath = await uploadRecording(authenticatedUserId, submissionId, recordingId, clip.blob, (upload) => {
-        setUploadProgress(Math.round(((index + upload.percentage / 100) / clips.length) * 100));
-      });
-      const { error: recordingError } = await supabase.from("recordings").insert({
-        id: recordingId,
-        submission_id: submissionId,
-        user_id: authenticatedUserId,
-        prompt_assignment_id: assignment.id,
-        object_path: objectPath,
-        checksum_sha256: checksum,
-        content_type: clip.blob.type || "video/webm",
-        file_size: clip.blob.size,
-        duration_seconds: clip.duration,
-        language: clip.language,
-        original_transcript: clip.transcript,
-        normalized_transcript: clip.transcript.toLocaleLowerCase(),
-        video_width: clip.metadata?.width || null,
-        video_height: clip.metadata?.height || null,
-        frame_rate: clip.metadata?.frameRate || null,
-        audio_sample_rate: clip.metadata?.audioSampleRate || null,
-        device_orientation: clip.metadata?.deviceOrientation || null,
-        browser: clip.metadata?.browser || null,
-        operating_system: clip.metadata?.operatingSystem || null,
-        device_category: clip.metadata?.deviceCategory || null,
-        device_model: clip.metadata?.deviceModel || null,
-        recording_location: clip.metadata?.recordingEnvironment || null,
-        lighting_condition: clip.metadata?.lightingCondition || null,
-        measured_light_level: clip.metadata?.measuredLightLevel || null,
-        estimated_noise: clip.metadata?.estimatedNoiseLevel || null,
-        snr_db: clip.metadata?.measuredSnrDb || null,
-        clipping_rate: clip.metadata?.clippingRate || null,
-        speaking_style: clip.metadata?.speakingStyle || null,
-        dialect: clip.metadata?.dialect || null,
-        language_sequence: clip.metadata?.codeSwitchLanguageSequence ? String(clip.metadata.codeSwitchLanguageSequence).split("+").map((value) => value.trim()) : [clip.language],
-        english_translation: clip.metadata?.englishTranslation || null,
-      });
-      if (recordingError) throw recordingError;
     }
     const { error } = await supabase.rpc("finalize_submission", { p_submission_id: submissionId });
     if (error) {
@@ -1015,7 +1120,8 @@ export default function Home() {
   }
 
   async function acceptRecording() {
-    if (!preview) return;
+    if (!preview || savingRecording) return;
+    setSavingRecording(true);
     const videoSettings = processedStreamRef.current?.getVideoTracks()[0]?.getSettings();
     const audioSettings = processedStreamRef.current?.getAudioTracks()[0]?.getSettings();
     const clip: Clip = {
@@ -1058,10 +1164,21 @@ export default function Home() {
       },
       blob: preview.blob,
     };
-    await saveClip(clip);
-    setClips((items) => [...items, clip]);
+    let savedClip = clip;
+    try {
+      savedClip = await persistAcceptedClip(clip);
+      await saveClip(savedClip);
+    } catch (error) {
+      setSavingRecording(false);
+      setUploadProgress(0);
+      setToast(error instanceof Error ? `Recording was not saved: ${error.message}` : "Recording was not saved. Please try again.");
+      setTimeout(() => setToast(""), 4000);
+      return;
+    }
+    setClips((items) => [...items.filter((item) => item.promptId !== savedClip.promptId), savedClip]);
     URL.revokeObjectURL(preview.url);
     setPreview(null);
+    setSavingRecording(false);
     setToast("Recording accepted");
     setTimeout(() => setToast(""), 2200);
     if (promptIndex === prompts.length - 1) setStep("review");
@@ -1384,7 +1501,7 @@ export default function Home() {
               <div className="record-controls">
                 {preview ? <>
                   <div className="quality-result"><span>✓</span><div><b>Recording captured</b><small>{preview.duration.toFixed(1)} seconds · stored only after acceptance</small></div></div>
-                  <button className="primary full" onClick={acceptRecording}>Accept recording</button>
+                  <button className="primary full" disabled={savingRecording} onClick={acceptRecording}>{savingRecording ? `Saving securely${uploadProgress ? ` ${uploadProgress}%` : "..."}` : "Accept recording"}</button>
                   <button className="secondary full" onClick={redo}>Redo recording</button>
                 </> : <>
                   <button className={`record-button ${recording ? "stop" : ""}`} disabled={!recording && (!cameraPassed || !audioPassed || !lightingPassed || !processedStreamRef.current)} onClick={recording ? stopRecording : beginRecording}><i />{recording ? "Stop" : "Record"}</button>
@@ -1402,10 +1519,10 @@ export default function Home() {
 
       {step === "review" && (
         <section className="shell review-shell">
-          <div className="section-head"><div><div className="eyebrow">Review your recordings</div><h2>Check before you submit.</h2><p>Play any clip, remove a problem recording, or return to recording. Submission sends the complete contribution to a human reviewer.</p></div><span className="time-pill">{clips.length} clips</span></div>
+          <div className="section-head"><div><div className="eyebrow">Review your recordings</div><h2>Check before you submit.</h2><p>Accepted clips are saved securely as you go. Play any clip, remove a problem recording, or return to recording. Final submission sends the complete contribution to a human reviewer.</p></div><span className="time-pill">{clips.length} clips</span></div>
           <div className="participant-review">
             <div className="review-list">
-              {clips.map((clip, index) => <div className="review-row" key={clip.id}><span>{index + 1}</span><div><b>{clip.promptId} · {clip.language}</b><small>{clip.transcript}</small></div><em>{clip.duration.toFixed(1)}s</em><button className="download" onClick={() => { if (reviewMedia) URL.revokeObjectURL(reviewMedia); setReviewMedia(URL.createObjectURL(clip.blob)); }}>Play</button><button className="download danger" onClick={async () => { if (!window.confirm(`Remove recording ${clip.promptId}? You will need to record this prompt again before submitting.`)) return; await deleteClip(clip.id); setClips((items) => items.filter((item) => item.id !== clip.id)); if (reviewMedia) { URL.revokeObjectURL(reviewMedia); setReviewMedia(""); } }}>Remove</button></div>)}
+              {clips.map((clip, index) => <div className="review-row" key={clip.id}><span>{index + 1}</span><div><b>{clip.promptId} · {clip.language}</b><small>{clip.transcript}</small></div><em>{clip.duration.toFixed(1)}s</em><button className="download" onClick={() => { if (reviewMedia) URL.revokeObjectURL(reviewMedia); setReviewMedia(URL.createObjectURL(clip.blob)); }}>Play</button><button className="download danger" onClick={async () => { if (!window.confirm(`Remove recording ${clip.promptId}? You will need to record this prompt again before submitting.`)) return; try { await removeAcceptedClip(clip); } catch { setToast("The recording could not be removed. Please try again."); return; } if (reviewMedia) { URL.revokeObjectURL(reviewMedia); setReviewMedia(""); } }}>Remove</button></div>)}
             </div>
             <aside className="review-player">{reviewMedia ? <video src={reviewMedia} controls autoPlay playsInline /> : <div><Mark>▶</Mark><p>Select a recording to play it here.</p></div>}<div className="submission-check"><b>Submission includes</b><small>Consent record, participant survey, {clips.length} recordings, calibration metrics, and recording metadata.</small></div></aside>
           </div>
