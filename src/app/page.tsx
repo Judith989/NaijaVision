@@ -223,17 +223,11 @@ export default function Home() {
           .limit(1)
           .maybeSingle();
         const resumableStatuses = ["draft", "recording", "uploading", "changes_requested", "resubmitted"];
-        let activeHasRecordings = false;
         if (activeSubmission && !resumableStatuses.includes(activeSubmission.status)) {
           window.location.replace(`${BASE_PATH}/dashboard#review-status`);
           return;
         }
         if (activeSubmission) {
-          const { count: savedRecordingCount } = await supabase
-            .from("recordings")
-            .select("id", { count: "exact", head: true })
-            .eq("submission_id", activeSubmission.id);
-          activeHasRecordings = Boolean(savedRecordingCount && savedRecordingCount > 0);
           const [{ data: savedSurvey }, { data: savedConsent }] = await Promise.all([
             supabase.from("surveys").select("responses").eq("id", activeSubmission.survey_id).maybeSingle(),
             supabase.from("consents").select("safe_speech_opt_in").eq("id", activeSubmission.consent_id).maybeSingle(),
@@ -258,7 +252,7 @@ export default function Home() {
             accountNumber: savedPayout.account_last4,
           }));
           setBankVerified(true);
-          if (activeSubmission && activeHasRecordings) openCalibration("record");
+          if (activeSubmission) openCalibration("record");
           else setStep("study");
         } else {
           if (savedPayout) {
