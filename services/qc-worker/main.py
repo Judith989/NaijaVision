@@ -123,9 +123,9 @@ async def process(recording: RecordingJob):
             similarity = SequenceMatcher(None, transcript.casefold(), recording.original_transcript.casefold()).ratio()
 
         failures = []
-        if video["mean_brightness"] < 45:
+        if video["mean_brightness"] < 25:
             failures.append("lighting_too_dark")
-        if video["mean_brightness"] > 225:
+        if video["mean_brightness"] > 240:
             failures.append("lighting_too_bright")
         if video["frozen_frame_ratio"] > 0.05:
             failures.append("frozen_video")

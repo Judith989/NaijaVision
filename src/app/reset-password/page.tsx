@@ -22,7 +22,7 @@ export default function ResetPasswordPage() {
   useEffect(() => {
     const supabase = getSupabase();
     if (!supabase) {
-      setChecking(false);
+      queueMicrotask(() => setChecking(false));
       return;
     }
     supabase.auth.getSession().then(({ data }) => {

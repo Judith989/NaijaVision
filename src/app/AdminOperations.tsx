@@ -6,8 +6,6 @@ import { backendConfigured, getSupabase } from "./lib/supabase";
 type Row = Record<string, unknown>;
 
 export function AdminOperations() {
-  const [userId, setUserId] = useState("");
-  const [role, setRole] = useState("reviewer");
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState("NGN");
   const [withdrawals, setWithdrawals] = useState<Row[]>([]);
@@ -18,6 +16,7 @@ export function AdminOperations() {
   const [releaseName, setReleaseName] = useState("NaijaVSR");
   const [releaseVersion, setReleaseVersion] = useState("");
   const [staffRequests, setStaffRequests] = useState<Row[]>([]);
+  const [staffMembers, setStaffMembers] = useState<Row[]>([]);
   const [participantQuery, setParticipantQuery] = useState("");
   const [participants, setParticipants] = useState<Row[]>([]);
   const [message, setMessage] = useState("");
@@ -25,13 +24,14 @@ export function AdminOperations() {
   async function refresh() {
     const supabase = getSupabase();
     if (!supabase) return;
-    const [withdrawalResult, riskResult, paymentResult, auditResult, releaseResult, staffRequestResult] = await Promise.all([
+    const [withdrawalResult, riskResult, paymentResult, auditResult, releaseResult, staffRequestResult, staffMemberResult] = await Promise.all([
       supabase.from("withdrawal_requests").select("*").in("status", ["requested", "processing"]).order("requested_at"),
       supabase.from("risk_flags").select("*").eq("status", "open").order("score", { ascending: false }),
       supabase.from("payments").select("id,submission_id,amount,currency,status,created_at").in("status", ["eligible", "processing", "failed"]).order("created_at"),
       supabase.from("audit_events").select("id,action,entity_type,entity_id,created_at").order("created_at", { ascending: false }).limit(25),
       supabase.from("dataset_releases").select("*").order("created_at", { ascending: false }),
       supabase.from("profiles").select("user_id,display_name,participant_id,created_at").eq("staff_request_status", "pending").eq("role", "participant").order("created_at"),
+      supabase.from("profiles").select("user_id,display_name,participant_id,role,account_status,updated_at").in("role", ["reviewer", "admin"]).order("role").order("display_name"),
     ]);
     setWithdrawals(withdrawalResult.data || []);
     setRisks(riskResult.data || []);
@@ -39,6 +39,7 @@ export function AdminOperations() {
     setAudit(auditResult.data || []);
     setReleases(releaseResult.data || []);
     setStaffRequests(staffRequestResult.data || []);
+    setStaffMembers(staffMemberResult.data || []);
   }
 
   async function searchParticipants() {
@@ -52,24 +53,25 @@ export function AdminOperations() {
   }
 
   async function promoteParticipant(id: string, newRole: "reviewer" | "admin") {
+    if (!window.confirm(`Grant ${newRole} access to this account?`)) return;
     const supabase = getSupabase();
-    const { error } = await supabase!.rpc("assign_role", { p_user_id: id, p_role: newRole });
+    const { error } = await supabase!.rpc("set_staff_role", { p_user_id: id, p_role: newRole });
     setMessage(error ? error.message : `Promoted to ${newRole}.`);
-    searchParticipants();
+    await Promise.all([refresh(), searchParticipants()]);
   }
 
-  useEffect(() => { refresh(); searchParticipants(); }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { refresh(); searchParticipants(); }, 0);
+    return () => window.clearTimeout(timer);
+    // The initial administrative snapshot is loaded once when the workspace opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   if (!backendConfigured) return <div className="notice"><p>Connect Supabase to activate administrative operations.</p></div>;
 
-  async function assignRole() {
-    const supabase = getSupabase();
-    const { error } = await supabase!.rpc("assign_role", { p_user_id: userId, p_role: role });
-    setMessage(error ? error.message : "Role assigned.");
-  }
-
   async function approveStaffRequest(id: string, approvedRole: "reviewer" | "admin") {
+    if (!window.confirm(`Approve this request with ${approvedRole} access?`)) return;
     const supabase = getSupabase();
-    const { error } = await supabase!.rpc("assign_role", { p_user_id: id, p_role: approvedRole });
+    const { error } = await supabase!.rpc("set_staff_role", { p_user_id: id, p_role: approvedRole });
     setMessage(error ? error.message : `Approved as ${approvedRole}.`);
     refresh();
   }
@@ -79,6 +81,15 @@ export function AdminOperations() {
     const { error } = await supabase!.rpc("dismiss_staff_request", { p_user_id: id });
     setMessage(error ? error.message : "Request dismissed.");
     refresh();
+  }
+
+  async function changeStaffRole(id: string, nextRole: "participant" | "reviewer" | "admin") {
+    const action = nextRole === "participant" ? "remove staff access from" : `change this account to ${nextRole} for`;
+    if (!window.confirm(`Are you sure you want to ${action} this account?`)) return;
+    const supabase = getSupabase();
+    const { error } = await supabase!.rpc("set_staff_role", { p_user_id: id, p_role: nextRole });
+    setMessage(error ? error.message : nextRole === "participant" ? "Staff access removed." : `Role changed to ${nextRole}.`);
+    await Promise.all([refresh(), searchParticipants()]);
   }
 
   async function createPolicy() {
@@ -130,13 +141,13 @@ export function AdminOperations() {
     refresh();
   }
 
-  return <section className="admin-operations">
+  return <section className="admin-operations" id="staff-management">
     <div className="section-head"><div><div className="eyebrow">Administrator controls</div><h2>Operations and governance</h2></div></div>
     {message && <p className="auth-message">{message}</p>}
     <div className="ops-grid">
       <div className="ops-card"><h3>Pending staff requests</h3>{staffRequests.length ? staffRequests.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} · {String(row.participant_id)}</span><button onClick={() => approveStaffRequest(String(row.user_id), "reviewer")}>Make reviewer</button><button onClick={() => approveStaffRequest(String(row.user_id), "admin")}>Make admin</button><button onClick={() => dismissStaffRequest(String(row.user_id))}>Dismiss</button></div>) : <p>No pending requests.</p>}</div>
+      <div className="ops-card"><h3>Current staff</h3><p className="ops-hint">Reviewers validate media. Administrators can also manage staff, payments, governance, and releases.</p>{staffMembers.length ? staffMembers.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} · {String(row.participant_id)} · {String(row.role)}</span>{row.role === "reviewer" ? <button onClick={() => changeStaffRole(String(row.user_id), "admin")}>Make admin</button> : <button onClick={() => changeStaffRole(String(row.user_id), "reviewer")}>Make reviewer</button>}<button onClick={() => changeStaffRole(String(row.user_id), "participant")}>Remove staff access</button></div>) : <p>No staff accounts found.</p>}</div>
       <div className="ops-card"><h3>Recruit a participant</h3><p className="ops-hint">Promote an existing contributor to reviewer or admin.</p><input value={participantQuery} onChange={(event) => setParticipantQuery(event.target.value)} placeholder="Search by name or participant ID" /><button className="primary" onClick={searchParticipants}>Search</button>{participants.length ? participants.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} · {String(row.participant_id)}</span><button onClick={() => promoteParticipant(String(row.user_id), "reviewer")}>Make reviewer</button><button onClick={() => promoteParticipant(String(row.user_id), "admin")}>Make admin</button></div>) : <p>No participants found.</p>}</div>
-      <div className="ops-card"><h3>Assign role</h3><input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="Supabase user UUID" /><select value={role} onChange={(event) => setRole(event.target.value)}><option>reviewer</option><option>admin</option><option>participant</option></select><button className="primary" onClick={assignRole}>Assign role</button></div>
       <div className="ops-card"><h3>Compensation policy</h3><input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Full-session amount" /><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option>NGN</option><option>GHS</option><option>USD</option><option>GBP</option><option>EUR</option></select><button className="primary" onClick={createPolicy}>Create policy</button></div>
       <div className="ops-card"><h3>Dataset release</h3><input value={releaseName} onChange={(event) => setReleaseName(event.target.value)} placeholder="Dataset name" /><input value={releaseVersion} onChange={(event) => setReleaseVersion(event.target.value)} placeholder="Version, e.g. 1.0" /><button className="primary" disabled={!releaseVersion} onClick={createRelease}>Create release draft</button></div>
     </div>

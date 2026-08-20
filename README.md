@@ -22,15 +22,15 @@ Open the local address printed in the terminal. Camera and microphone access nor
 - Camera and microphone calibration
 - Face-landmark gating with a 720p minimum input check
 - Mandatory microphone check for a live audio track with a minimum 8 kHz sample rate
-- Mandatory lighting measurement with an accepted range beginning at 45
+- Mandatory lighting measurement with an accepted range of 25 to 240
 - Canvas-based 256 x 128 mouth-only recording stream
 - Prompt-by-prompt recording, replay, retake, skip, and acceptance
-- 69 core prompts across five languages, seven code-switch combinations, natural speech, numbers, and names
+- 82 prompts across five languages, seven code-switch combinations, natural speech, numbers, names, and the optional NaijaSafeSpeech subset
 - Six separately optional NaijaSafeSpeech prompts
 - Language-based prompt assignment from the participant survey
 - Resumable participant drafts with mandatory recalibration on return
 - Participant review, submission, human validation, and compensation status
-- Temporary IndexedDB persistence while the shared research backend is developed
+- Immediate private Supabase persistence after participant acceptance, with IndexedDB as a local fallback
 - Duration-based preliminary quality status
 
 ## Data handling
@@ -114,6 +114,12 @@ update public.profiles
 set role = 'admin'
 where user_id = 'AUTH_USER_UUID';
 ```
+
+After the first administrator signs in, open Dashboard, then **Admin and staff
+workspace**. The administrator can approve pending staff requests, search for an
+existing participant by name or participant ID, grant reviewer or admin access,
+change a staff role, or remove staff access. Role changes are exclusive, audited,
+and protected against self-demotion and removal of the final administrator.
 
 The service-role key belongs only in the CLI, deployment secrets, and trusted
 server environments. It must never be placed in a `NEXT_PUBLIC_` variable.

@@ -21,7 +21,7 @@ export default function SignUpPage() {
   const [staffMode, setStaffMode] = useState(false);
 
   useEffect(() => {
-    setStaffMode(new URLSearchParams(window.location.search).get("staff") === "1");
+    queueMicrotask(() => setStaffMode(new URLSearchParams(window.location.search).get("staff") === "1"));
     const supabase = getSupabase();
     if (!supabase) return;
     supabase.auth.getUser().then(({ data }) => {

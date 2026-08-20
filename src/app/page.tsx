@@ -23,6 +23,20 @@ type Clip = {
   backendRecordingId?: string;
   objectPath?: string;
 };
+type RecordingJoinRow = {
+  id: string;
+  object_path: string;
+  duration_seconds: number;
+  language: string;
+  original_transcript?: string;
+  quality_status: string;
+  prompt_assignments: { prompt_id: string } | Array<{ prompt_id: string }> | null;
+};
+type RecordingReviewRow = { recording_id: string; decision: "approved" | "rejected" | "changes_requested" };
+
+function joinedPromptId(row: RecordingJoinRow) {
+  return Array.isArray(row.prompt_assignments) ? row.prompt_assignments[0]?.prompt_id || "" : row.prompt_assignments?.prompt_id || "";
+}
 
 const languages = ["Igbo", "Yorùbá", "Hausa", "Nigerian Pidgin", "Nigerian English"];
 const countries = ["Nigeria", "Ghana", "Cameroon", "Benin", "Togo", "Other"];
@@ -188,8 +202,8 @@ export default function Home() {
 
   useEffect(() => { loadClips().then((items) => setClips(items.filter((clip) => clip.metadata?.sessionId === profile.code))).catch(() => undefined); }, [profile.code]);
   useEffect(() => { fetch(`${BASE_PATH}/nigeria-lgas.json`).then((response) => response.json()).then(setLgas).catch(() => setLgas({})); }, []);
-  useEffect(() => { setHasDraft(Boolean(localStorage.getItem("naijavision-contribution-draft"))); }, []);
-  useEffect(() => { setReportingPromptIssue(false); setPromptIssueText(""); }, [promptIndex]);
+  useEffect(() => { queueMicrotask(() => setHasDraft(Boolean(localStorage.getItem("naijavision-contribution-draft")))); }, []);
+  useEffect(() => { queueMicrotask(() => { setReportingPromptIssue(false); setPromptIssueText(""); }); }, [promptIndex]);
   useEffect(() => {
     if (step !== "account" || !authenticatedUserId) return;
     const supabase = getSupabase();
@@ -283,6 +297,8 @@ export default function Home() {
       if (policy) setCompensation(policy);
     });
     return () => listener.subscription.unsubscribe();
+    // Authentication bootstrap runs once and then uses Supabase's auth listener.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     if (step !== "reviewer") return;
@@ -306,11 +322,11 @@ export default function Home() {
       .eq("submission_id", selectedReviewId)
       .then(async ({ data }) => {
         const rows = data || [];
-        const signed = await Promise.all(rows.map(async (row: any) => {
+        const signed = await Promise.all((rows as unknown as RecordingJoinRow[]).map(async (row) => {
           const { data: url } = await supabase.storage.from("raw-recordings").createSignedUrl(row.object_path, 900);
           return {
             id: row.id,
-            prompt_id: row.prompt_assignments?.prompt_id || "",
+            prompt_id: joinedPromptId(row),
             language: row.language,
             duration_seconds: row.duration_seconds,
             quality_status: row.quality_status,
@@ -398,7 +414,7 @@ export default function Home() {
   useEffect(() => {
     if (step !== "record" || preview || !current || !clips.some((clip) => clip.promptId === current.id)) return;
     const missingIndex = prompts.findIndex((prompt) => !clips.some((clip) => clip.promptId === prompt.id));
-    if (missingIndex >= 0 && missingIndex !== promptIndex) setPromptIndex(missingIndex);
+    if (missingIndex >= 0 && missingIndex !== promptIndex) queueMicrotask(() => setPromptIndex(missingIndex));
   }, [step, preview, current, clips, prompts, promptIndex]);
   const consentReady = Object.values(consent).every(Boolean);
   const acceptedCount = clips.filter((c) => c.status === "accepted").length;
@@ -488,12 +504,13 @@ export default function Home() {
         .select("recording_id,decision")
         .eq("submission_id", activeId)
         .in("decision", ["rejected", "changes_requested"]);
-      const redoRecordingIds = new Set((reviewRows || []).map((review: any) => review.recording_id));
-      const redoIds = (rows || [])
-        .filter((row: any) => redoRecordingIds.has(row.id))
-        .map((row: any) => row.prompt_assignments?.prompt_id)
+      const typedRows = (rows || []) as unknown as RecordingJoinRow[];
+      const redoRecordingIds = new Set(((reviewRows || []) as RecordingReviewRow[]).map((review) => review.recording_id));
+      const redoIds = typedRows
+        .filter((row) => redoRecordingIds.has(row.id))
+        .map(joinedPromptId)
         .filter(Boolean);
-      const legacyFallbackIds = (rows || []).map((row: any) => row.prompt_assignments?.prompt_id).filter(Boolean);
+      const legacyFallbackIds = typedRows.map(joinedPromptId).filter(Boolean);
       setRedoPromptIds(redoIds.length ? redoIds : legacyFallbackIds);
       setClips([]);
       setPromptIndex(0);
@@ -501,14 +518,14 @@ export default function Home() {
     }
 
     setRedoPromptIds(null);
-    const restored = await Promise.all((rows || []).map(async (row: any) => {
+    const restored = await Promise.all(((rows || []) as unknown as RecordingJoinRow[]).map(async (row) => {
       const { data: blob, error: downloadError } = await supabase.storage.from("raw-recordings").download(row.object_path);
       if (downloadError || !blob) return null;
-      const promptId = row.prompt_assignments?.prompt_id || "";
+      const promptId = joinedPromptId(row);
       const clip: Clip = {
         id: row.id,
         promptId,
-        transcript: row.original_transcript,
+        transcript: row.original_transcript || "",
         language: row.language,
         duration: Number(row.duration_seconds),
         createdAt: new Date().toISOString(),
@@ -790,7 +807,10 @@ export default function Home() {
       return;
     }
     const { error: qcError } = await supabase.functions.invoke("dispatch-quality-control", { body: { submissionId } });
-    if (qcError) setToast("Submission uploaded. Automated quality control is queued for retry.");
+    if (qcError) {
+      const { error: manualQueueError } = await supabase.rpc("queue_manual_review", { p_submission_id: submissionId });
+      setToast(manualQueueError ? "Submission uploaded. Quality control needs administrator attention." : "Submission uploaded and queued for human review.");
+    }
     setUploadProgress(100);
     setSubmissionStatus("pending-review");
     localStorage.removeItem("naijavision-contribution-draft");

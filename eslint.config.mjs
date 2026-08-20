@@ -11,6 +11,8 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "public/mediapipe-wasm/**",
+    "public/face_landmarker.task",
     "next-env.d.ts",
   ]),
 ]);

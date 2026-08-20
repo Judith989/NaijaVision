@@ -15,13 +15,14 @@ Deno.serve(async (request) => {
       .single();
     if (error || !payment) return json({ error: "No eligible payment exists." }, 404);
 
+    const payoutUrl = Deno.env.get("PAYMENTS_PROVIDER_PAYOUT_URL");
+    const apiKey = Deno.env.get("PAYMENTS_PROVIDER_API_KEY");
+    if (!payoutUrl || !apiKey) return json({ error: "Payment provider is not configured." }, 503);
+
     await service.from("payments").update({
       status: "processing", approved_by: user.id, approved_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     }).eq("id", payment.id);
 
-    const payoutUrl = Deno.env.get("PAYMENTS_PROVIDER_PAYOUT_URL");
-    const apiKey = Deno.env.get("PAYMENTS_PROVIDER_API_KEY");
-    if (!payoutUrl || !apiKey) return json({ error: "Payment provider is not configured." }, 503);
     const response = await fetch(payoutUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
