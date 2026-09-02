@@ -234,6 +234,7 @@ export default function Home() {
         const { data: latestSubmission } = await supabase
           .from("submissions")
           .select("id,status,survey_id,consent_id,compensation_amount,compensation_currency,completed_language_count")
+          .eq("user_id", data.user.id)
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
