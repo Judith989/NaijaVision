@@ -180,7 +180,7 @@ export default function Home() {
   const [adminWorkspaceView, setAdminWorkspaceView] = useState<"reviews" | "operations">("reviews");
   const [reviewerRecords, setReviewerRecords] = useState<Array<{ id: string; prompt_id: string; language: string; duration_seconds: number; quality_status: string; object_path: string; signed_url: string; review_decision?: "approved" | "rejected" | "changes_requested" }>>([]);
   const [reviewerPayments, setReviewerPayments] = useState<ReviewerPaymentRow[]>([]);
-  const [reviewerRate, setReviewerRate] = useState({ amount: 25, currency: "NGN" });
+  const [reviewerRate, setReviewerRate] = useState({ amount: 10, currency: "NGN" });
   const [reviewerPayout, setReviewerPayout] = useState<{ bank_name: string; account_last4: string; verified_at: string | null } | null>(null);
   const [localRecordingReviews, setLocalRecordingReviews] = useState<Record<string, "approved" | "rejected" | "changes_requested">>({});
   const [withdrawalReason, setWithdrawalReason] = useState("");
@@ -1728,7 +1728,7 @@ export default function Home() {
           <section className="reviewer-overview">
             <div className="metric-grid reviewer-metrics"><div><span>Rate per video</span><b>₦{reviewerRate.amount.toLocaleString()}</b><small>Each unique video reviewed</small></div><div><span>Videos reviewed</span><b>{reviewerVideoCount}</b><small>Across {reviewerPayments.length} participant submissions</small></div><div><span>Total earned</span><b>₦{reviewerTotalEarned.toLocaleString()}</b><small>Paid and pending reviewer fees</small></div><div><span>Awaiting payment</span><b>₦{reviewerPending.toLocaleString()}</b><small>₦{reviewerPaid.toLocaleString()} paid to date</small></div></div>
             <div className="reviewer-account-strip"><div><small>Assigned work</small><b>{reviewQueue.length} submissions currently in your review queue</b></div><div><small>Payment destination</small><b>{reviewerPayout ? `${reviewerPayout.bank_name} ending ${reviewerPayout.account_last4}` : "No verified payment account"}</b></div><Link className="secondary" href="/?contribute=1&payment=edit">{reviewerPayout ? "Update payment details" : "Add payment details"}</Link></div>
-            <p className="reviewer-rate-example">Example: 50 videos × ₦25 = ₦1,250. Reviewer earnings are separate from participant compensation.</p>
+            <p className="reviewer-rate-example">Example: 50 videos × ₦10 = ₦500. Reviewer earnings are separate from participant compensation.</p>
           </section>
           {backendConfigured && <div className="submission-selector"><label><span>{currentRole === "admin" ? "Select a participant submission" : "Select an assigned submission"}</span><select value={selectedReviewId} onChange={(event) => event.target.value ? selectReviewerSubmission(event.target.value) : setSelectedReviewId("")}><option value="">Choose a submission</option>{reviewQueue.map((item) => <option key={item.id} value={item.id}>{item.participant_id} | {item.status.replaceAll("_", " ")} | {item.expected_recordings} recordings | {new Date(item.created_at).toLocaleDateString()}</option>)}</select></label>{reviewQueue.length === 0 && <p>{currentRole === "admin" ? "No submissions are awaiting action." : "No submissions are assigned to you yet. An administrator must assign one first."}</p>}</div>}
           {selectedReviewId ? <>
