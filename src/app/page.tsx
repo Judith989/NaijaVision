@@ -33,6 +33,7 @@ type RecordingJoinRow = {
   prompt_assignments: { prompt_id: string } | Array<{ prompt_id: string }> | null;
 };
 type RecordingReviewRow = { recording_id: string; decision: "approved" | "rejected" | "changes_requested" };
+type ReviewerPaymentRow = { reviewed_video_count: number; rate_per_video: number; amount: number; currency: string; status: string };
 
 function joinedPromptId(row: RecordingJoinRow) {
   return Array.isArray(row.prompt_assignments) ? row.prompt_assignments[0]?.prompt_id || "" : row.prompt_assignments?.prompt_id || "";
@@ -178,6 +179,9 @@ export default function Home() {
   const [adminDecisionComments, setAdminDecisionComments] = useState("");
   const [adminWorkspaceView, setAdminWorkspaceView] = useState<"reviews" | "operations">("reviews");
   const [reviewerRecords, setReviewerRecords] = useState<Array<{ id: string; prompt_id: string; language: string; duration_seconds: number; quality_status: string; object_path: string; signed_url: string; review_decision?: "approved" | "rejected" | "changes_requested" }>>([]);
+  const [reviewerPayments, setReviewerPayments] = useState<ReviewerPaymentRow[]>([]);
+  const [reviewerRate, setReviewerRate] = useState({ amount: 25, currency: "NGN" });
+  const [reviewerPayout, setReviewerPayout] = useState<{ bank_name: string; account_last4: string; verified_at: string | null } | null>(null);
   const [localRecordingReviews, setLocalRecordingReviews] = useState<Record<string, "approved" | "rejected" | "changes_requested">>({});
   const [withdrawalReason, setWithdrawalReason] = useState("");
   const [withdrawalRequested, setWithdrawalRequested] = useState(false);
@@ -345,6 +349,20 @@ export default function Home() {
         setReviewQueue(queue);
       });
   }, [step, selectedReviewId, currentRole, authenticatedUserId]);
+  useEffect(() => {
+    if (step !== "reviewer" || !authenticatedUserId || !backendConfigured) return;
+    const supabase = getSupabase();
+    if (!supabase) return;
+    Promise.all([
+      supabase.from("reviewer_payments").select("reviewed_video_count,rate_per_video,amount,currency,status").eq("reviewer_id", authenticatedUserId),
+      supabase.from("reviewer_compensation_policies").select("amount_per_video,currency").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle(),
+      supabase.from("payout_accounts").select("bank_name,account_last4,verified_at").eq("user_id", authenticatedUserId).maybeSingle(),
+    ]).then(([paymentResult, policyResult, payoutResult]) => {
+      setReviewerPayments((paymentResult.data || []).map((row) => ({ ...row, reviewed_video_count: Number(row.reviewed_video_count), rate_per_video: Number(row.rate_per_video), amount: Number(row.amount) })) as ReviewerPaymentRow[]);
+      if (policyResult.data) setReviewerRate({ amount: Number(policyResult.data.amount_per_video), currency: policyResult.data.currency });
+      setReviewerPayout(payoutResult.data || null);
+    });
+  }, [step, authenticatedUserId]);
   useEffect(() => {
     if (!backendConfigured || !selectedReviewId) return;
     const supabase = getSupabase();
@@ -1331,6 +1349,10 @@ export default function Home() {
   const everyRecordingReviewed = reviewerRecords.length > 0 && reviewerRecords.every((record) => Boolean(record.review_decision));
   const everyRecordingApproved = reviewerRecords.length > 0 && reviewerRecords.every((record) => record.review_decision === "approved");
   const hasRecordingForRedo = reviewerRecords.some((record) => record.review_decision === "rejected" || record.review_decision === "changes_requested");
+  const reviewerVideoCount = reviewerPayments.reduce((total, payment) => total + payment.reviewed_video_count, 0);
+  const reviewerTotalEarned = reviewerPayments.reduce((total, payment) => total + payment.amount, 0);
+  const reviewerPaid = reviewerPayments.filter((payment) => payment.status === "paid").reduce((total, payment) => total + payment.amount, 0);
+  const reviewerPending = reviewerPayments.filter((payment) => payment.status !== "paid" && payment.status !== "cancelled").reduce((total, payment) => total + payment.amount, 0);
 
   return (
     <main>
@@ -1703,6 +1725,11 @@ export default function Home() {
           <div className="admin-title"><div><div className="eyebrow">{currentRole === "admin" && adminWorkspaceView === "operations" ? "Administrator controls" : "Human validation"}</div><h1>{currentRole === "admin" ? adminWorkspaceView === "operations" ? "Administrator workspace" : "Review workspace" : "Reviewer workspace"}</h1><p>{currentRole === "admin" && adminWorkspaceView === "operations" ? "Manage roles, assignments, compensation, risk, withdrawals, and dataset releases." : "Review submitted media and send a documented recommendation. Administrators make final decisions and control compensation."}</p></div></div>
           {currentRole === "admin" && <div className="workspace-tabs"><button className={adminWorkspaceView === "reviews" ? "active" : ""} onClick={() => setAdminWorkspaceView("reviews")}>Submission reviews</button><button className={adminWorkspaceView === "operations" ? "active" : ""} onClick={() => setAdminWorkspaceView("operations")}>Administration</button></div>}
           {(currentRole !== "admin" || adminWorkspaceView === "reviews") && <>
+          <section className="reviewer-overview">
+            <div className="metric-grid reviewer-metrics"><div><span>Rate per video</span><b>₦{reviewerRate.amount.toLocaleString()}</b><small>Each unique video reviewed</small></div><div><span>Videos reviewed</span><b>{reviewerVideoCount}</b><small>Across {reviewerPayments.length} participant submissions</small></div><div><span>Total earned</span><b>₦{reviewerTotalEarned.toLocaleString()}</b><small>Paid and pending reviewer fees</small></div><div><span>Awaiting payment</span><b>₦{reviewerPending.toLocaleString()}</b><small>₦{reviewerPaid.toLocaleString()} paid to date</small></div></div>
+            <div className="reviewer-account-strip"><div><small>Assigned work</small><b>{reviewQueue.length} submissions currently in your review queue</b></div><div><small>Payment destination</small><b>{reviewerPayout ? `${reviewerPayout.bank_name} ending ${reviewerPayout.account_last4}` : "No verified payment account"}</b></div><Link className="secondary" href="/?contribute=1&payment=edit">{reviewerPayout ? "Update payment details" : "Add payment details"}</Link></div>
+            <p className="reviewer-rate-example">Example: 50 videos × ₦25 = ₦1,250. Reviewer earnings are separate from participant compensation.</p>
+          </section>
           {backendConfigured && <div className="submission-selector"><label><span>{currentRole === "admin" ? "Select a participant submission" : "Select an assigned submission"}</span><select value={selectedReviewId} onChange={(event) => event.target.value ? selectReviewerSubmission(event.target.value) : setSelectedReviewId("")}><option value="">Choose a submission</option>{reviewQueue.map((item) => <option key={item.id} value={item.id}>{item.participant_id} | {item.status.replaceAll("_", " ")} | {item.expected_recordings} recordings | {new Date(item.created_at).toLocaleDateString()}</option>)}</select></label>{reviewQueue.length === 0 && <p>{currentRole === "admin" ? "No submissions are awaiting action." : "No submissions are assigned to you yet. An administrator must assign one first."}</p>}</div>}
           {selectedReviewId ? <>
           <div className="selected-submission-banner"><span>Currently reviewing</span><b>{selectedReviewSubmission?.participant_id || "Unknown participant"}</b><small>Submission {selectedReviewId.slice(0, 8)} | {selectedReviewSubmission?.status.replaceAll("_", " ")}</small></div>
