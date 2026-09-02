@@ -18,10 +18,8 @@ export default function SignUpPage() {
   const [message, setMessage] = useState("");
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [staffMode, setStaffMode] = useState(false);
 
   useEffect(() => {
-    queueMicrotask(() => setStaffMode(new URLSearchParams(window.location.search).get("staff") === "1"));
     const supabase = getSupabase();
     if (!supabase) return;
     supabase.auth.getUser().then(({ data }) => {
@@ -57,7 +55,6 @@ export default function SignUpPage() {
         first_name: normalizedFirstName,
         last_name: normalizedLastName,
         full_name: `${normalizedFirstName} ${normalizedLastName}`,
-        requesting_staff_access: staffMode,
       } },
     });
     setLoading(false);
@@ -79,15 +76,15 @@ export default function SignUpPage() {
           <span className="brand-icon"><i /><i /><i /></span>
           <span>Naija<span>Vision</span></span>
         </Link>
-        <div className="top-context"><span className="privacy-dot" /> {staffMode ? "Staff access request" : "Participant sign up"}</div>
+        <div className="top-context"><span className="privacy-dot" /> Participant sign up</div>
       </header>
 
       <section className="shell narrow">
         <div className="section-head">
           <div>
-            <div className="eyebrow">{staffMode ? "Reviewer and administrator access" : "Open research participation"}</div>
-            <h2>{staffMode ? "Request a staff account." : "Create your participant account."}</h2>
-            <p>{staffMode ? "This creates a plain account with no special access. An administrator must approve reviewer or admin permissions afterward." : "Use this account to contribute recordings, save progress, follow review decisions, and receive approved compensation."}</p>
+            <div className="eyebrow">Open research participation</div>
+            <h2>Create your participant account.</h2>
+            <p>Use this account to contribute recordings, save progress, follow review decisions, and receive approved compensation.</p>
           </div>
         </div>
 

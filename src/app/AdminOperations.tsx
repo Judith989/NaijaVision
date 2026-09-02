@@ -17,7 +17,6 @@ export function AdminOperations() {
   const [releases, setReleases] = useState<Row[]>([]);
   const [releaseName, setReleaseName] = useState("NaijaVSR");
   const [releaseVersion, setReleaseVersion] = useState("");
-  const [staffRequests, setStaffRequests] = useState<Row[]>([]);
   const [staffMembers, setStaffMembers] = useState<Row[]>([]);
   const [pendingSubmissions, setPendingSubmissions] = useState<Row[]>([]);
   const [reviewerAssignments, setReviewerAssignments] = useState<Record<string, string>>({});
@@ -29,7 +28,7 @@ export function AdminOperations() {
   async function refresh() {
     const supabase = getSupabase();
     if (!supabase) return;
-    const [withdrawalResult, riskResult, paymentResult, reviewerPaymentResult, reviewerPolicyResult, auditResult, releaseResult, staffRequestResult, staffMemberResult, submissionResult, policyResult] = await Promise.all([
+    const [withdrawalResult, riskResult, paymentResult, reviewerPaymentResult, reviewerPolicyResult, auditResult, releaseResult, staffMemberResult, submissionResult, policyResult] = await Promise.all([
       supabase.from("withdrawal_requests").select("*").in("status", ["requested", "processing"]).order("requested_at"),
       supabase.from("risk_flags").select("*").eq("status", "open").order("score", { ascending: false }),
       supabase.from("payments").select("id,submission_id,amount,currency,status,created_at").in("status", ["eligible", "processing", "failed"]).order("created_at"),
@@ -37,7 +36,6 @@ export function AdminOperations() {
       supabase.from("reviewer_compensation_policies").select("amount_per_video,currency,effective_at").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle(),
       supabase.from("audit_events").select("id,action,entity_type,entity_id,created_at").order("created_at", { ascending: false }).limit(25),
       supabase.from("dataset_releases").select("*").order("created_at", { ascending: false }),
-      supabase.from("profiles").select("user_id,display_name,participant_id,created_at").eq("staff_request_status", "pending").eq("role", "participant").order("created_at"),
       supabase.from("profiles").select("user_id,display_name,participant_id,role,account_status,updated_at").in("role", ["reviewer", "admin"]).order("role").order("display_name"),
       supabase.from("submissions").select("id,participant_id,status,expected_recordings,assigned_reviewer_id,created_at").in("status", ["automated_qc", "awaiting_review", "resubmitted"]).order("created_at"),
       supabase.from("compensation_policies").select("id,amount,currency,pricing_basis,effective_at").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle(),
@@ -49,7 +47,6 @@ export function AdminOperations() {
     setReviewerPolicy(reviewerPolicyResult.data || null);
     setAudit(auditResult.data || []);
     setReleases(releaseResult.data || []);
-    setStaffRequests(staffRequestResult.data || []);
     setStaffMembers(staffMemberResult.data || []);
     setPendingSubmissions(submissionResult.data || []);
     setActivePolicy(policyResult.data || null);
@@ -81,27 +78,12 @@ export function AdminOperations() {
   }, []);
   if (!backendConfigured) return <div className="notice"><p>Connect Supabase to activate administrative operations.</p></div>;
 
-  async function approveStaffRequest(id: string, approvedRole: "reviewer" | "admin") {
-    if (!window.confirm(`Approve this request with ${approvedRole} access?`)) return;
-    const supabase = getSupabase();
-    const { error } = await supabase!.rpc("set_staff_role", { p_user_id: id, p_role: approvedRole });
-    setMessage(error ? error.message : `Approved as ${approvedRole}.`);
-    refresh();
-  }
-
-  async function dismissStaffRequest(id: string) {
-    const supabase = getSupabase();
-    const { error } = await supabase!.rpc("dismiss_staff_request", { p_user_id: id });
-    setMessage(error ? error.message : "Request dismissed.");
-    refresh();
-  }
-
   async function changeStaffRole(id: string, nextRole: "participant" | "reviewer" | "admin") {
-    const action = nextRole === "participant" ? "remove staff access from" : `change this account to ${nextRole} for`;
+    const action = nextRole === "participant" ? "change this account back to participant for" : `change this account to ${nextRole} for`;
     if (!window.confirm(`Are you sure you want to ${action} this account?`)) return;
     const supabase = getSupabase();
     const { error } = await supabase!.rpc("set_staff_role", { p_user_id: id, p_role: nextRole });
-    setMessage(error ? error.message : nextRole === "participant" ? "Staff access removed." : `Role changed to ${nextRole}.`);
+    setMessage(error ? error.message : nextRole === "participant" ? "Role changed to participant." : `Role changed to ${nextRole}.`);
     await Promise.all([refresh(), searchParticipants()]);
   }
 
@@ -180,7 +162,6 @@ export function AdminOperations() {
     <div className="section-head"><div><div className="eyebrow">Administrator controls</div><h2>Operations and governance</h2></div></div>
     {message && <p className="auth-message">{message}</p>}
     <div className="ops-grid">
-      <div className="ops-card"><h3>Pending access requests</h3><p className="ops-hint">A request is not a separate staff role. Approve it as reviewer or administrator.</p>{staffRequests.length ? staffRequests.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} | {String(row.participant_id)}</span><button onClick={() => approveStaffRequest(String(row.user_id), "reviewer")}>Make reviewer</button><button onClick={() => approveStaffRequest(String(row.user_id), "admin")}>Make admin</button><button onClick={() => dismissStaffRequest(String(row.user_id))}>Dismiss</button></div>) : <p>No pending requests.</p>}</div>
       <div className="ops-card"><h3>Reviewers and administrators</h3><p className="ops-hint">Reviewers assess assigned media. Administrators assign work, make final decisions, manage payments, and control releases.</p>{staffMembers.length ? staffMembers.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} | {String(row.participant_id)} | {String(row.role)}</span>{row.role === "reviewer" ? <button onClick={() => changeStaffRole(String(row.user_id), "admin")}>Make admin</button> : <button onClick={() => changeStaffRole(String(row.user_id), "reviewer")}>Make reviewer</button>}<button onClick={() => changeStaffRole(String(row.user_id), "participant")}>Remove access</button></div>) : <p>No reviewer or administrator accounts found.</p>}</div>
       <div className="ops-card"><h3>Add a reviewer or administrator</h3><p className="ops-hint">Find an existing participant account, then grant the appropriate role.</p><input value={participantQuery} onChange={(event) => setParticipantQuery(event.target.value)} placeholder="Search by name or participant ID" /><button className="primary" onClick={searchParticipants}>Search</button>{participants.length ? participants.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} | {String(row.participant_id)}</span><button onClick={() => promoteParticipant(String(row.user_id), "reviewer")}>Make reviewer</button><button onClick={() => promoteParticipant(String(row.user_id), "admin")}>Make admin</button></div>) : <p>No participants found.</p>}</div>
       <div className="ops-card"><h3>Participant compensation policy</h3><p className="ops-hint">This rate is multiplied by distinct languages with saved recordings. Code-switched combinations do not count as extra languages. Payment still requires administrator approval.</p>{activePolicy && <p><b>Current:</b> {String(activePolicy.amount)} {String(activePolicy.currency)} per completed language</p>}<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Amount per completed language" /><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option>NGN</option><option>GHS</option><option>USD</option><option>GBP</option><option>EUR</option></select><button className="primary" onClick={createPolicy}>Replace active policy</button></div>

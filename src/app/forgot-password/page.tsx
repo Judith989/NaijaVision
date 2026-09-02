@@ -46,7 +46,7 @@ export default function ForgotPasswordPage() {
           <div>
             <div className="eyebrow">Reviewer &amp; administrator access</div>
             <h2>Reset your password.</h2>
-            <p>Enter the email on your staff account and we&apos;ll send a link to set a new password.</p>
+            <p>Enter the email on your account and we&apos;ll send a link to set a new password.</p>
           </div>
         </div>
 

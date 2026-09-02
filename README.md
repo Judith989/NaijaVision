@@ -115,11 +115,12 @@ set role = 'admin'
 where user_id = 'AUTH_USER_UUID';
 ```
 
-After the first administrator signs in, open Dashboard, then **Admin and staff
-workspace**. The administrator can approve pending staff requests, search for an
-existing participant by name or participant ID, grant reviewer or admin access,
-change a staff role, or remove staff access. Role changes are exclusive, audited,
-and protected against self-demotion and removal of the final administrator.
+After the first administrator signs in, open Dashboard, then **Admin workspace**.
+The administrator can search for an existing participant by name or participant
+ID, assign the reviewer or admin role, change a role, or return an account to the
+participant role. There is no public role-request workflow. Role changes are
+exclusive, audited, and protected against self-demotion and removal of the final
+administrator.
 
 The service-role key belongs only in the CLI, deployment secrets, and trusted
 server environments. It must never be placed in a `NEXT_PUBLIC_` variable.

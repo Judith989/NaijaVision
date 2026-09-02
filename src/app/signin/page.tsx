@@ -53,9 +53,9 @@ export default function SignInPage() {
       <section className="shell narrow">
         <div className="section-head">
           <div>
-            <div className="eyebrow">Participant and staff access</div>
+            <div className="eyebrow">Account access</div>
             <h2>Sign in to your account.</h2>
-            <p>Access your contribution dashboard, recording progress, review status, and staff tools where applicable.</p>
+            <p>Access your contribution dashboard, recording progress, review status, and any internally assigned reviewer or administrator tools.</p>
           </div>
         </div>
 
@@ -87,7 +87,6 @@ export default function SignInPage() {
         </div>
 
         <p className="auth-switch">New participant? <Link href="/signup">Create an account</Link></p>
-        <p className="auth-switch">Reviewer or administrator? <Link href="/signup?staff=1">Request staff access</Link></p>
       </section>
     </main>
   );
