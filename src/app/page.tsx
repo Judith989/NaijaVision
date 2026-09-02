@@ -184,6 +184,7 @@ export default function Home() {
   const [backendSubmissionStatus, setBackendSubmissionStatus] = useState("");
   const [notifications, setNotifications] = useState<Array<{ id: string; title: string; message: string; created_at: string }>>([]);
   const [compensation, setCompensation] = useState<{ amount: number; currency: string } | null>(null);
+  const [earnedCompensation, setEarnedCompensation] = useState<{ amount: number; currency: string; completedLanguages: number } | null>(null);
   const [hasDraft, setHasDraft] = useState(false);
   const sourceVideoRef = useRef<HTMLVideoElement>(null);
   const mouthCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -232,12 +233,13 @@ export default function Home() {
       if (requestedMode.get("contribute") === "1") {
         const { data: latestSubmission } = await supabase
           .from("submissions")
-          .select("id,status,survey_id,consent_id")
+          .select("id,status,survey_id,consent_id,compensation_amount,compensation_currency,completed_language_count")
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
         const resumableStatuses = ["draft", "recording", "uploading", "changes_requested", "resubmitted"];
         const activeSubmission = latestSubmission && resumableStatuses.includes(latestSubmission.status) ? latestSubmission : null;
+        if (latestSubmission) setEarnedCompensation({ amount: Number(latestSubmission.compensation_amount || 0), currency: latestSubmission.compensation_currency || "NGN", completedLanguages: Number(latestSubmission.completed_language_count || 0) });
         const awaitingDecisionStatuses = ["submitted", "automated_qc", "awaiting_review", "payment_eligible", "payment_processing"];
         if (latestSubmission && awaitingDecisionStatuses.includes(latestSubmission.status)) {
           window.location.replace(`${BASE_PATH}/dashboard#review-status`);
@@ -465,7 +467,8 @@ export default function Home() {
   const acceptedCount = clips.filter((c) => c.status === "accepted").length;
   const progress = Math.min(100, (acceptedCount / prompts.length) * 100);
   const compensationRate = compensation || PER_LANGUAGE_COMPENSATION;
-  const estimatedCompensation = { ...compensationRate, amount: compensationRate.amount * Math.max(1, selectedLanguages.size) };
+  const potentialCompensation = { ...compensationRate, amount: compensationRate.amount * selectedLanguages.size };
+  const displayedEarnings = earnedCompensation || { amount: 0, currency: compensationRate.currency, completedLanguages: 0 };
 
   function saveDraftAndExit() {
     localStorage.setItem("naijavision-contribution-draft", JSON.stringify({
@@ -1253,6 +1256,10 @@ export default function Home() {
     try {
       savedClip = await persistAcceptedClip(clip);
       await saveClip(savedClip);
+      if (backendConfigured && submissionId) {
+        const { data: earnings } = await getSupabase()!.from("submissions").select("compensation_amount,compensation_currency,completed_language_count").eq("id", submissionId).maybeSingle();
+        if (earnings) setEarnedCompensation({ amount: Number(earnings.compensation_amount || 0), currency: earnings.compensation_currency || "NGN", completedLanguages: Number(earnings.completed_language_count || 0) });
+      }
     } catch (error) {
       setSavingRecording(false);
       setUploadProgress(0);
@@ -1420,10 +1427,10 @@ export default function Home() {
             <h3>What we collect</h3><p>Audio, mouth-region video, transcripts, language and demographic responses, device and environment metadata, calibration results, recording quality information, consent status, and a non-identifying participant ID.</p>
             <h3>Privacy limitation</h3><blockquote>The collection method reduces identity exposure by excluding most of the face, while acknowledging that audio and mouth-region video remain potentially identifiable biometric data.</blockquote>
             <h3>Public release and research use</h3><p>Accepted research recordings and approved participant metadata are intended for public dataset release and AI research.</p>
-            <h3>Review and compensation</h3><p>Submission does not guarantee approval. A trained reviewer checks prompt accuracy, audio and video quality, privacy, duplication, and policy compliance. The rate is 500 NGN for each distinct selected language, payable only after approval.</p>
+            <h3>Review and compensation</h3><p>Submission does not guarantee approval. A trained reviewer checks prompt accuracy, audio and video quality, privacy, duplication, and policy compliance. The rate is 500 NGN for each language whose required recordings are completed, payable only after approval.</p>
             <div className="compensation-callout">
-              <div><small>Rate per selected language</small><b>{compensationRate.amount} {compensationRate.currency}</b></div>
-              <div><small>Current estimated total</small><b>{estimatedCompensation.amount} {estimatedCompensation.currency}</b></div>
+              <div><small>Rate per completed language</small><b>{compensationRate.amount} {compensationRate.currency}</b></div>
+              <div><small>Potential total for selected languages</small><b>{potentialCompensation.amount} {potentialCompensation.currency}</b></div>
             </div>
             <h3>Your choice and rights</h3><p>Participation is voluntary. You may skip optional questions, redo recordings, stop before submission, and request access, correction, or withdrawal where applicable. NaijaVSR participation does not require NaijaSafeSpeech participation.</p>
           </article>
@@ -1565,7 +1572,7 @@ export default function Home() {
 
             <div className="eyebrow" style={{ marginTop: 22 }}>Your session</div><h3>{acceptedCount} of {prompts.length} saved</h3>
             <div className="progress"><i style={{ width: `${progress}%` }} /></div>
-            <div className="earnings-row"><small>Estimated compensation</small><b>{estimatedCompensation.amount} {estimatedCompensation.currency}</b></div>
+            <div className="earnings-row"><small>Participant earnings</small><b>{displayedEarnings.amount} {displayedEarnings.currency}</b><small>{displayedEarnings.completedLanguages} completed languages</small></div>
 
             <div className="prompt-list">{prompts.map((p, i) => { const completed = clips.some((c) => c.promptId === p.id); return <button type="button" key={p.id} aria-current={i === promptIndex ? "step" : undefined} onClick={() => selectPrompt(i)} className={`${i === promptIndex ? "current" : ""} ${completed ? "done" : ""}`}><span>{completed ? "✓" : i + 1}</span><div><b>{p.type}</b><small>{p.language}</small></div></button>; })}</div>
             <button className="secondary full" disabled={!clips.length} onClick={() => setStep("review")}>Review recordings ({clips.length})</button>
@@ -1629,7 +1636,7 @@ export default function Home() {
           <div className="review-summary">
             <div><small>Completed</small><b>{clips.length} of {prompts.length}</b></div>
             <div><small>Still required</small><b>{Math.max(0, prompts.length - clips.length)}</b></div>
-            <div><small>Compensation after approval</small><b>{estimatedCompensation.amount} {estimatedCompensation.currency}</b></div>
+            <div><small>Compensation after approval</small><b>{displayedEarnings.amount} {displayedEarnings.currency}</b></div>
             <div><small>Payment destination</small><b>{account.bankName ? `${account.bankName} ···· ${account.accountNumber.slice(-4)}` : "Saved payment account"}</b></div>
           </div>
           <div className="notice"><Mark>i</Mark><p><b>Payment follows approval.</b> Submit only after checking the recordings. A reviewer validates the files first, then an administrator processes compensation to the payment destination shown above.</p></div>
