@@ -280,31 +280,17 @@ export default function Home() {
           setBankVerified(true);
           if (activeSubmission) openCalibration("record");
           else if (latestSubmission && ["paid", "rejected", "withdrawn"].includes(latestSubmission.status) && savedResponses && savedConsent) {
-            const { data: activeVersion } = await supabase.from("consent_versions").select("id").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle();
-            if (!activeVersion || activeVersion.id !== savedConsent.consent_version_id) {
-              setStep("study");
-            } else {
-              const savedProfile = savedResponses as typeof profile;
-              const savedLanguages = Array.from(new Set([
-                savedProfile.primary,
-                savedProfile.homeLanguage,
-                savedProfile.workLanguage,
-                ...(savedProfile.nativeLanguages || []),
-                ...(savedProfile.otherLanguages || []),
-                ...(savedProfile.dailyLanguages || []),
-              ].filter(Boolean)));
-              const { data: newSubmissionId, error: startError } = await supabase.rpc("begin_submission", {
-                p_consent_version_id: activeVersion.id,
-                p_safe_speech_opt_in: savedConsent.safe_speech_opt_in,
-                p_survey: savedProfile,
-                p_languages: savedLanguages,
-              });
-              if (startError) setToast(startError.message);
+            const { data: newSubmissionId, error: startError } = await supabase.rpc("start_next_submission");
+            if (startError) {
+              if (startError.message.toLowerCase().includes("consent renewal")) setStep("study");
               else {
-                setSubmissionId(newSubmissionId);
-                setPromptIndex(0);
-                openCalibration("record");
+                setToast(`A new contribution could not be started: ${startError.message}`);
+                setStep("welcome");
               }
+            } else {
+              setSubmissionId(newSubmissionId);
+              setPromptIndex(0);
+              openCalibration("record");
             }
           } else setStep("study");
         } else {
@@ -1555,9 +1541,10 @@ export default function Home() {
                 ["Mouth crop", cameraPassed ? "Face forward, 720p input, lips tracked" : "Not yet passed", cameraPassed],
                 ["Microphone check", audioPassed ? "Live microphone track is ready" : "Allow microphone access and check that a microphone is connected", audioPassed],
                 ["Lighting", lightingPassed ? `Lighting is ready at ${lightLevel}` : lightLevel < MIN_LIGHT_LEVEL ? `Brightness ${lightLevel}. Add a little light in front of you.` : `Brightness ${lightLevel}. Reduce harsh direct light.`, lightingPassed],
-              ].map(([label, value, ok]) => <div className="device-check" key={String(label)}><span className={ok ? "ok" : ""}>{ok ? "✓" : "·"}</span><div><b>{label}</b><small>{value}</small></div></div>)}
-              <div className="tip"><b>All checks are required</b><p>Recording remains locked until a live microphone track and the mouth, camera, and lighting checks pass. Volume, background noise, clipping, and speech activity are saved as reviewer warnings, but they do not block this test.</p></div>
-            </div>
+               ].map(([label, value, ok]) => <div className="device-check" key={String(label)}><span className={ok ? "ok" : ""}>{ok ? "✓" : "·"}</span><div><b>{label}</b><small>{value}</small></div></div>)}
+               <div className="tip"><b>All checks are required</b><p>Recording remains locked until a live microphone track and the mouth, camera, and lighting checks pass. Volume, background noise, clipping, and speech activity are saved as reviewer warnings, but they do not block this test.</p></div>
+               <div className="calibration-cta"><button className="secondary" onClick={() => setStep(calibrationReturnStep)}>Back</button><button className="primary" disabled={!cameraPassed || !audioPassed || !lightingPassed || !processedStreamRef.current} onClick={() => setStep("record")}>{cameraPassed && audioPassed && lightingPassed ? "Begin recording" : "Complete checks to continue"} <span>→</span></button></div>
+             </div>
           </div>
           <div className="requirements">
             <div><h3>Environment</h3><p>Choose a quiet location with usable front lighting. The accepted brightness range is {MIN_LIGHT_LEVEL} to {MAX_LIGHT_LEVEL}. Keep the camera steady at eye level, avoid strong backlighting, and minimize movement behind you.</p></div>
@@ -1568,7 +1555,6 @@ export default function Home() {
             <h3>Participant recording checklist</h3><p>Confirm the environment and speaking conditions. Face visibility and audio activity are tested automatically above.</p>
             <MultiSelect options={["Good lighting", "Minimal background noise", "Camera stable", "Mouth unobstructed", "Speech will be natural", "No expected interruption"]} value={qualityConfirm} onChange={setQualityConfirm} />
           </div>
-          <div className="footer-actions"><button className="secondary" onClick={() => setStep(calibrationReturnStep)}>Back</button><button className="primary" disabled={!cameraPassed || !audioPassed || !lightingPassed || !processedStreamRef.current} onClick={() => setStep("record")}>Start recording <span>→</span></button></div>
         </section>
       )}
 
