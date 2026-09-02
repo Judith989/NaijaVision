@@ -56,9 +56,7 @@ const fallbackNigerianBanks = [
   { name: "Unity Bank", code: "215" }, { name: "Wema Bank", code: "035" },
   { name: "Zenith Bank", code: "057" },
 ];
-const REGULAR_COMPENSATION = { amount: 4000, currency: "NGN" };
-const FULL_COMPENSATION = { amount: 5000, currency: "NGN" };
-const SAFE_SPEECH_BONUS = 1000;
+const PER_LANGUAGE_COMPENSATION = { amount: 500, currency: "NGN" };
 const MIN_LIGHT_LEVEL = 25;
 const MAX_LIGHT_LEVEL = 240;
 
@@ -465,9 +463,8 @@ export default function Home() {
   const consentReady = Object.values(consent).every(Boolean);
   const acceptedCount = clips.filter((c) => c.status === "accepted").length;
   const progress = Math.min(100, (acceptedCount / prompts.length) * 100);
-  const estimatedCompensation = compensation
-    ? { ...compensation, amount: compensation.amount + (harmful ? SAFE_SPEECH_BONUS : 0) }
-    : (harmful ? FULL_COMPENSATION : REGULAR_COMPENSATION);
+  const compensationRate = compensation || PER_LANGUAGE_COMPENSATION;
+  const estimatedCompensation = { ...compensationRate, amount: compensationRate.amount * Math.max(1, selectedLanguages.size) };
 
   function saveDraftAndExit() {
     localStorage.setItem("naijavision-contribution-draft", JSON.stringify({
@@ -1421,10 +1418,10 @@ export default function Home() {
             <h3>What we collect</h3><p>Audio, mouth-region video, transcripts, language and demographic responses, device and environment metadata, calibration results, recording quality information, consent status, and a non-identifying participant ID.</p>
             <h3>Privacy limitation</h3><blockquote>The collection method reduces identity exposure by excluding most of the face, while acknowledging that audio and mouth-region video remain potentially identifiable biometric data.</blockquote>
             <h3>Public release and research use</h3><p>Accepted research recordings and approved participant metadata are intended for public dataset release and AI research.</p>
-            <h3>Review and compensation</h3><p>Submission does not guarantee approval. A trained reviewer checks prompt accuracy, audio and video quality, privacy, duplication, and policy compliance. Payment becomes eligible only after approval under the published compensation policy.</p>
+            <h3>Review and compensation</h3><p>Submission does not guarantee approval. A trained reviewer checks prompt accuracy, audio and video quality, privacy, duplication, and policy compliance. The rate is 500 NGN for each distinct selected language, payable only after approval.</p>
             <div className="compensation-callout">
-              <div><small>Regular participation</small><b>{compensation ? `${compensation.amount} ${compensation.currency}` : `${REGULAR_COMPENSATION.amount} ${REGULAR_COMPENSATION.currency}`}</b></div>
-              <div><small>With NaijaSafeSpeech</small><b>{compensation ? `${compensation.amount + SAFE_SPEECH_BONUS} ${compensation.currency}` : `${FULL_COMPENSATION.amount} ${FULL_COMPENSATION.currency}`}</b></div>
+              <div><small>Rate per selected language</small><b>{compensationRate.amount} {compensationRate.currency}</b></div>
+              <div><small>Current estimated total</small><b>{estimatedCompensation.amount} {estimatedCompensation.currency}</b></div>
             </div>
             <h3>Your choice and rights</h3><p>Participation is voluntary. You may skip optional questions, redo recordings, stop before submission, and request access, correction, or withdrawal where applicable. NaijaVSR participation does not require NaijaSafeSpeech participation.</p>
           </article>
