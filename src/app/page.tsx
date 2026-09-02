@@ -311,7 +311,10 @@ export default function Home() {
           setStep("account");
         }
       }
-      if (requestedMode.get("reviewer") === "1" && (role === "reviewer" || role === "admin")) setStep("reviewer");
+      if (requestedMode.get("reviewer") === "1" && (role === "reviewer" || role === "admin")) {
+        if (role === "admin" && requestedMode.get("workspace") === "admin") setAdminWorkspaceView("operations");
+        setStep("reviewer");
+      }
       const { data: policy } = await supabase.from("compensation_policies").select("amount,currency").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle();
       if (policy) setCompensation(policy);
     });
