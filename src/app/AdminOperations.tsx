@@ -158,6 +158,34 @@ export function AdminOperations() {
     refresh();
   }
 
+  async function rejectRelease(id: string) {
+    const reason = window.prompt("Why are you rejecting this dataset release?");
+    if (reason === null) return;
+    if (!reason.trim()) {
+      setMessage("Enter a reason before rejecting the dataset release.");
+      return;
+    }
+    if (!window.confirm("Reject this dataset release? It will not be publishable unless it is returned to draft and reviewed again.")) return;
+    const supabase = getSupabase();
+    const { error } = await supabase!.from("dataset_releases").update({
+      status: "rejected",
+      rejection_reason: reason.trim(),
+    }).eq("id", id);
+    setMessage(error ? error.message : "Dataset release rejected.");
+    refresh();
+  }
+
+  async function returnReleaseToDraft(id: string) {
+    if (!window.confirm("Return this dataset release to draft for correction?")) return;
+    const supabase = getSupabase();
+    const { error } = await supabase!.from("dataset_releases").update({
+      status: "draft",
+      rejection_reason: null,
+    }).eq("id", id);
+    setMessage(error ? error.message : "Dataset release returned to draft.");
+    refresh();
+  }
+
   return <section className="admin-operations" id="staff-management">
     <div className="section-head"><div><div className="eyebrow">Administrator controls</div><h2>Operations and governance</h2></div></div>
     {message && <p className="auth-message">{message}</p>}
@@ -176,7 +204,7 @@ export function AdminOperations() {
       <div className="ops-card"><h3>Participant payment queue</h3>{payments.length ? payments.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.amount)} {String(row.currency)} · {String(row.status)}</span></div>) : <p>No participant payments require action.</p>}</div>
       <div className="ops-card"><h3>Reviewer payment queue</h3>{reviewerPayments.length ? reviewerPayments.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.reviewed_video_count)} videos × {String(row.rate_per_video)} {String(row.currency)} = {String(row.amount)} {String(row.currency)} · {String(row.status)}</span>{row.status !== "processing" && <button onClick={() => setReviewerPaymentStatus(String(row.id), "processing")}>Processing</button>}<button onClick={() => setReviewerPaymentStatus(String(row.id), "paid")}>Paid</button><button onClick={() => setReviewerPaymentStatus(String(row.id), "failed")}>Failed</button></div>) : <p>No reviewer payments require action.</p>}</div>
       <div className="ops-card"><h3>Recent audit events</h3>{audit.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.action)} · {String(row.entity_type)}</span><small>{new Date(String(row.created_at)).toLocaleString()}</small></div>)}</div>
-      <div className="ops-card"><h3>Release pipeline</h3>{releases.length ? releases.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.name)} {String(row.version)} · {String(row.status)}</span>{row.status === "draft" && <button onClick={() => advanceRelease(String(row.id), "privacy_review")}>Privacy review</button>}{row.status === "privacy_review" && <button onClick={() => advanceRelease(String(row.id), "approved")}>Approve</button>}{row.status === "approved" && <button onClick={() => advanceRelease(String(row.id), "published")}>Publish</button>}</div>) : <p>No release drafts.</p>}</div>
+      <div className="ops-card"><h3>Release pipeline</h3><p className="ops-hint">This controls publication of a complete dataset release. It is separate from approving or rejecting individual participant recordings.</p>{releases.length ? releases.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.name)} {String(row.version)} | {String(row.status)}{row.rejection_reason ? ` | ${String(row.rejection_reason)}` : ""}</span>{row.status === "draft" && <button onClick={() => advanceRelease(String(row.id), "privacy_review")}>Send to privacy review</button>}{row.status === "privacy_review" && <><button onClick={() => returnReleaseToDraft(String(row.id))}>Return to draft</button><button className="danger" onClick={() => rejectRelease(String(row.id))}>Reject</button><button onClick={() => advanceRelease(String(row.id), "approved")}>Approve</button></>}{row.status === "rejected" && <button onClick={() => returnReleaseToDraft(String(row.id))}>Return to draft</button>}{row.status === "approved" && <button onClick={() => advanceRelease(String(row.id), "published")}>Publish</button>}</div>) : <p>No release drafts.</p>}</div>
     </div>
   </section>;
 }
