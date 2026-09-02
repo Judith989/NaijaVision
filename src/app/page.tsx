@@ -934,14 +934,6 @@ export default function Home() {
   }
 
   async function selectReviewerSubmission(id: string) {
-    const supabase = getSupabase();
-    if (supabase && currentRole === "reviewer") {
-      const { error } = await supabase.rpc("claim_submission", { p_submission_id: id });
-      if (error && !error.message.toLowerCase().includes("assigned")) {
-        setToast(error.message);
-        return;
-      }
-    }
     setReviewComments("");
     setAdminDecisionComments("");
     setReviewRecommendation(null);
@@ -1334,7 +1326,7 @@ export default function Home() {
 
   const routeOrder: Step[] = ["account", "study", "consent", "profile", "calibrate", "record", "review", "complete"];
   const activeIndex = routeOrder.indexOf(step);
-  const navLabel = step === "reviewer" ? "Reviewer workspace" : step === "welcome" ? "Open research contribution" : "Participant session";
+  const navLabel = step === "reviewer" ? currentRole === "admin" && adminWorkspaceView === "operations" ? "Administrator workspace" : "Review workspace" : step === "welcome" ? "Open research contribution" : "Participant session";
   const selectedReviewSubmission = reviewQueue.find((item) => item.id === selectedReviewId);
   const everyRecordingReviewed = reviewerRecords.length > 0 && reviewerRecords.every((record) => Boolean(record.review_decision));
   const everyRecordingApproved = reviewerRecords.length > 0 && reviewerRecords.every((record) => record.review_decision === "approved");
@@ -1355,7 +1347,7 @@ export default function Home() {
         {currentRole === "reviewer" || currentRole === "admin" ? (
           <nav className="workspace-nav" aria-label="Account navigation">
             <Link className="admin-link" href="/dashboard">Dashboard</Link>
-            <button className="admin-link" onClick={() => setStep(step === "reviewer" ? "welcome" : "reviewer")}>{step === "reviewer" ? "Recording site" : "Review workspace"}</button>
+            {currentRole === "reviewer" ? <button className="admin-link" onClick={() => setStep(step === "reviewer" ? "welcome" : "reviewer")}>{step === "reviewer" ? "Participant site" : "Reviewer workspace"}</button> : <><button className="admin-link" onClick={() => { setAdminWorkspaceView("reviews"); setStep("reviewer"); }}>Review workspace</button><button className="admin-link" onClick={() => { setAdminWorkspaceView("operations"); setStep("reviewer"); }}>Admin workspace</button></>}
             {backendConfigured && <button className="admin-link" onClick={handleStaffSignOut}>Sign out</button>}
           </nav>
         ) : authenticatedUserId ? (
@@ -1708,7 +1700,7 @@ export default function Home() {
 
       {step === "reviewer" && (
         <section className="admin-shell">
-          <div className="admin-title"><div><div className="eyebrow">Human validation</div><h1>{currentRole === "admin" ? "Review and administration" : "Reviewer workspace"}</h1><p>Review submitted media and send a documented recommendation. Administrators make final decisions and control compensation.</p></div></div>
+          <div className="admin-title"><div><div className="eyebrow">{currentRole === "admin" && adminWorkspaceView === "operations" ? "Administrator controls" : "Human validation"}</div><h1>{currentRole === "admin" ? adminWorkspaceView === "operations" ? "Administrator workspace" : "Review workspace" : "Reviewer workspace"}</h1><p>{currentRole === "admin" && adminWorkspaceView === "operations" ? "Manage roles, assignments, compensation, risk, withdrawals, and dataset releases." : "Review submitted media and send a documented recommendation. Administrators make final decisions and control compensation."}</p></div></div>
           {currentRole === "admin" && <div className="workspace-tabs"><button className={adminWorkspaceView === "reviews" ? "active" : ""} onClick={() => setAdminWorkspaceView("reviews")}>Submission reviews</button><button className={adminWorkspaceView === "operations" ? "active" : ""} onClick={() => setAdminWorkspaceView("operations")}>Administration</button></div>}
           {(currentRole !== "admin" || adminWorkspaceView === "reviews") && <>
           {backendConfigured && <div className="submission-selector"><label><span>{currentRole === "admin" ? "Select a participant submission" : "Select an assigned submission"}</span><select value={selectedReviewId} onChange={(event) => event.target.value ? selectReviewerSubmission(event.target.value) : setSelectedReviewId("")}><option value="">Choose a submission</option>{reviewQueue.map((item) => <option key={item.id} value={item.id}>{item.participant_id} | {item.status.replaceAll("_", " ")} | {item.expected_recordings} recordings | {new Date(item.created_at).toLocaleDateString()}</option>)}</select></label>{reviewQueue.length === 0 && <p>{currentRole === "admin" ? "No submissions are awaiting action." : "No submissions are assigned to you yet. An administrator must assign one first."}</p>}</div>}
