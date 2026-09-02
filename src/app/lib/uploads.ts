@@ -26,8 +26,9 @@ export async function uploadRecording(
 
   const projectHost = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!).host;
   const projectId = projectHost.split(".")[0];
-  const objectName = `${userId}/${submissionId}/${recordingId}.webm`;
   const contentType = (blob.type || "video/webm").split(";", 1)[0].trim().toLowerCase();
+  const extension = contentType === "video/mp4" ? "mp4" : "webm";
+  const objectName = `${userId}/${submissionId}/${recordingId}.${extension}`;
   const uploadBlob = blob.type === contentType ? blob : new Blob([blob], { type: contentType });
 
   await new Promise<void>((resolve, reject) => {

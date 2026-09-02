@@ -1213,12 +1213,22 @@ export default function Home() {
   function beginRecording() {
     const recordingStream = processedStreamRef.current;
     if (!recordingStream || !cameraPassed || !audioPassed || !lightingPassed) return;
-    const preferred = MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus") ? "video/webm;codecs=vp8,opus" : "video/webm";
+    const preferred = [
+      "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+      "video/mp4;codecs=avc1,mp4a.40.2",
+      "video/mp4",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+    ].find((type) => MediaRecorder.isTypeSupported(type));
+    if (!preferred) {
+      setToast("This browser cannot create a supported video file. Update the browser or try Chrome, Edge, or Safari.");
+      return;
+    }
     const recorder = new MediaRecorder(recordingStream, { mimeType: preferred, videoBitsPerSecond: 1_500_000, audioBitsPerSecond: 96_000 });
     chunksRef.current = [];
     recorder.ondataavailable = (event) => event.data.size && chunksRef.current.push(event.data);
     recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: preferred });
+      const blob = new Blob(chunksRef.current, { type: recorder.mimeType || preferred });
       const duration = (Date.now() - startedRef.current) / 1000;
       setPreview({ blob, duration, url: URL.createObjectURL(blob) });
     };
