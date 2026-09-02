@@ -197,6 +197,7 @@ export default function Home() {
   const speechFramesRef = useRef(0);
   const lightStableFramesRef = useRef(0);
   const processedStreamRef = useRef<MediaStream | null>(null);
+  const recordingCanvasTrackRef = useRef<CanvasCaptureMediaStreamTrack | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const startedRef = useRef(0);
@@ -521,6 +522,8 @@ export default function Home() {
     stream?.getTracks().forEach((track) => track.stop());
     processedStreamRef.current?.getTracks().forEach((track) => track.stop());
     processedStreamRef.current = null;
+    recordingCanvasTrackRef.current = null;
+    recordingCanvasTrackRef.current = null;
     void audioContextRef.current?.close().catch(() => undefined);
     audioContextRef.current = null;
     analyserRef.current = null;
@@ -1018,6 +1021,7 @@ export default function Home() {
     stream?.getTracks().forEach((track) => track.stop());
     processedStreamRef.current?.getTracks().forEach((track) => track.stop());
     processedStreamRef.current = null;
+    recordingCanvasTrackRef.current = null;
     setStream(null);
     setCameraPassed(false);
     setAudioPassed(false);
@@ -1091,6 +1095,7 @@ export default function Home() {
           ctx.scale(-1, 1);
           ctx.drawImage(video, sourceX, sourceY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
           ctx.restore();
+          recordingCanvasTrackRef.current?.requestFrame();
           const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
           let luminance = 0;
           for (let index = 0; index < pixels.length; index += 16) {
@@ -1161,12 +1166,32 @@ export default function Home() {
       if (performance.now() - startedAt >= 7000) {
         setCalibrating(false);
         if (faceOk && audioOk && lightOk) {
+          const recordingAudioContext = audioContextRef.current;
+          if (!recordingAudioContext) {
+            setCalibrationMessage("The audio processor stopped unexpectedly. Reconnect the microphone and run calibration again.");
+            return;
+          }
           finished = true;
           setCalibrationMessage("Camera, microphone, and lighting calibration passed. The recording stream contains only the mouth crop and synchronized audio.");
-          const canvasStream = canvas.captureStream(30);
+          const canvasStream = canvas.captureStream(0);
+          const canvasTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack;
+          recordingCanvasTrackRef.current = canvasTrack;
+          const audioDestination = recordingAudioContext.createMediaStreamDestination();
+          const microphoneSource = recordingAudioContext.createMediaStreamSource(new MediaStream([audioTrack]));
+          const highPass = recordingAudioContext.createBiquadFilter();
+          highPass.type = "highpass";
+          highPass.frequency.value = 100;
+          highPass.Q.value = 0.7;
+          const compressor = recordingAudioContext.createDynamicsCompressor();
+          compressor.threshold.value = -24;
+          compressor.knee.value = 18;
+          compressor.ratio.value = 3;
+          compressor.attack.value = 0.01;
+          compressor.release.value = 0.2;
+          microphoneSource.connect(highPass).connect(compressor).connect(audioDestination);
           const combined = new MediaStream([
-            ...canvasStream.getVideoTracks(),
-            ...stream.getAudioTracks().map((track) => track.clone()),
+            canvasTrack,
+            ...audioDestination.stream.getAudioTracks(),
           ]);
           processedStreamRef.current?.getTracks().forEach((track) => track.stop());
           processedStreamRef.current = combined;
@@ -1188,8 +1213,8 @@ export default function Home() {
   function beginRecording() {
     const recordingStream = processedStreamRef.current;
     if (!recordingStream || !cameraPassed || !audioPassed || !lightingPassed) return;
-    const preferred = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus") ? "video/webm;codecs=vp9,opus" : "video/webm";
-    const recorder = new MediaRecorder(recordingStream, { mimeType: preferred });
+    const preferred = MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus") ? "video/webm;codecs=vp8,opus" : "video/webm";
+    const recorder = new MediaRecorder(recordingStream, { mimeType: preferred, videoBitsPerSecond: 1_500_000, audioBitsPerSecond: 96_000 });
     chunksRef.current = [];
     recorder.ondataavailable = (event) => event.data.size && chunksRef.current.push(event.data);
     recorder.onstop = () => {
