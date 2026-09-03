@@ -996,7 +996,7 @@ export default function Home() {
     try {
       const media = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 }, facingMode: "user" },
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false, channelCount: 1, sampleRate: { ideal: 48000 } },
       });
       setStream(media);
       if (media.getAudioTracks().length) {
@@ -1068,6 +1068,7 @@ export default function Home() {
     let peakLevel = 0;
     let clippedSamples = 0;
     let totalSamples = 0;
+    let lastValidCrop: { x: number; y: number; width: number; height: number } | null = null;
 
     const analyze = () => {
       const video = sourceVideoRef.current;
@@ -1101,13 +1102,13 @@ export default function Home() {
         const adequateInput = video.videoWidth >= 720 && lipWidth >= 55 && lipHeight >= 18;
         const frontal = Math.abs(landmarks[33].z - landmarks[263].z) < 0.035;
         if (validCrop && adequateInput && frontal) {
+          lastValidCrop = { x: sourceX, y: sourceY, width: cropWidth, height: cropHeight };
           ctx.save();
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           ctx.translate(canvas.width, 0);
           ctx.scale(-1, 1);
           ctx.drawImage(video, sourceX, sourceY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
           ctx.restore();
-          recordingCanvasTrackRef.current?.requestFrame();
           const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
           let luminance = 0;
           for (let index = 0; index < pixels.length; index += 16) {
@@ -1125,6 +1126,14 @@ export default function Home() {
           faceStableFramesRef.current += 1;
         } else {
           faceStableFramesRef.current = Math.max(0, faceStableFramesRef.current - 2);
+          if (lastValidCrop) {
+            ctx.save();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, lastValidCrop.x, lastValidCrop.y, lastValidCrop.width, lastValidCrop.height, 0, 0, canvas.width, canvas.height);
+            ctx.restore();
+          }
         }
       } else {
         faceStableFramesRef.current = 0;
@@ -1185,22 +1194,30 @@ export default function Home() {
           }
           finished = true;
           setCalibrationMessage("Camera, microphone, and lighting calibration passed. The recording stream contains only the mouth crop and synchronized audio.");
-          const canvasStream = canvas.captureStream(0);
+          const canvasStream = canvas.captureStream(30);
           const canvasTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack;
+          canvasTrack.contentHint = "motion";
           recordingCanvasTrackRef.current = canvasTrack;
           const audioDestination = recordingAudioContext.createMediaStreamDestination();
           const microphoneSource = recordingAudioContext.createMediaStreamSource(new MediaStream([audioTrack]));
           const highPass = recordingAudioContext.createBiquadFilter();
           highPass.type = "highpass";
-          highPass.frequency.value = 100;
+          highPass.frequency.value = 120;
           highPass.Q.value = 0.7;
-          const compressor = recordingAudioContext.createDynamicsCompressor();
-          compressor.threshold.value = -24;
-          compressor.knee.value = 18;
-          compressor.ratio.value = 3;
-          compressor.attack.value = 0.01;
-          compressor.release.value = 0.2;
-          microphoneSource.connect(highPass).connect(compressor).connect(audioDestination);
+          const hum50 = recordingAudioContext.createBiquadFilter();
+          hum50.type = "notch";
+          hum50.frequency.value = 50;
+          hum50.Q.value = 12;
+          const hum100 = recordingAudioContext.createBiquadFilter();
+          hum100.type = "notch";
+          hum100.frequency.value = 100;
+          hum100.Q.value = 12;
+          const hum150 = recordingAudioContext.createBiquadFilter();
+          hum150.type = "notch";
+          hum150.frequency.value = 150;
+          hum150.Q.value = 12;
+          microphoneSource.connect(highPass).connect(hum50).connect(hum100).connect(hum150).connect(audioDestination);
+          audioDestination.stream.getAudioTracks().forEach((track) => { track.contentHint = "speech"; });
           const combined = new MediaStream([
             canvasTrack,
             ...audioDestination.stream.getAudioTracks(),
@@ -1244,7 +1261,7 @@ export default function Home() {
       const duration = (Date.now() - startedRef.current) / 1000;
       setPreview({ blob, duration, url: URL.createObjectURL(blob) });
     };
-    recorder.start(250);
+    recorder.start(1000);
     recorderRef.current = recorder;
     startedRef.current = Date.now();
     setElapsed(0);
