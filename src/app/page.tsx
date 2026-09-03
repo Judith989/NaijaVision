@@ -172,7 +172,7 @@ export default function Home() {
   const [reviewMedia, setReviewMedia] = useState("");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [submissionId, setSubmissionId] = useState("");
-  const [reviewQueue, setReviewQueue] = useState<Array<{ id: string; participant_id: string; status: string; expected_recordings: number; created_at: string; assigned_reviewer_id: string | null }>>([]);
+  const [reviewQueue, setReviewQueue] = useState<Array<{ id: string; user_id: string; participant_id: string; status: string; expected_recordings: number; created_at: string; assigned_reviewer_id: string | null }>>([]);
   const [selectedReviewId, setSelectedReviewId] = useState("");
   const [reviewRecommendation, setReviewRecommendation] = useState<{ recommendation: "approved" | "rejected" | "changes_requested"; comments: string } | null>(null);
   const [reviewComments, setReviewComments] = useState("");
@@ -340,12 +340,14 @@ export default function Home() {
     const supabase = getSupabase();
     if (!supabase) return;
     let query = supabase.from("submissions")
-      .select("id,participant_id,status,expected_recordings,created_at,assigned_reviewer_id")
+      .select("id,user_id,participant_id,status,expected_recordings,created_at,assigned_reviewer_id")
       .in("status", ["automated_qc", "awaiting_review", "resubmitted", "payment_eligible", "payment_processing"])
       .order("created_at", { ascending: true });
     if (currentRole === "reviewer" && authenticatedUserId) query = query.eq("assigned_reviewer_id", authenticatedUserId);
     query.then(({ data }) => {
-        const queue = data || [];
+        const queue = currentRole === "reviewer"
+          ? (data || []).filter((submission) => submission.user_id !== authenticatedUserId)
+          : data || [];
         setReviewQueue(queue);
       });
   }, [step, selectedReviewId, currentRole, authenticatedUserId]);
