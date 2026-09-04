@@ -1703,6 +1703,7 @@ export default function Home() {
                 <small>{current.type === "Natural speech" ? `Answer naturally for up to ${current.responseSeconds} seconds` : current.type === "NaijaSafeSpeech" ? "Performed research prompt · optional subset" : "Read this naturally"}</small>
                 <div className="script-text">{current.text}</div>
                 {current.translation && <p className="script-translation">{current.translation}</p>}
+                <p className="speaking-reminder">Please speak loudly and clearly while recording.</p>
               </div>
               <div className="recorder-grid">
               <div className="record-video">
