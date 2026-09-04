@@ -34,6 +34,7 @@ type RecordingJoinRow = {
 };
 type RecordingReviewRow = { recording_id: string; decision: "approved" | "rejected" | "changes_requested" };
 type ReviewerPaymentRow = { reviewed_video_count: number; rate_per_video: number; amount: number; currency: string; status: string };
+type ReviewQueueItem = { id: string; user_id: string; participant_id: string; status: string; expected_recordings: number; created_at: string; assigned_reviewer_id: string | null; recommendation?: "approved" | "rejected" | "changes_requested"; recommendation_status?: "pending" | "returned" | "accepted" | "participant_returned"; recommendation_updated_at?: string };
 
 function joinedPromptId(row: RecordingJoinRow) {
   return Array.isArray(row.prompt_assignments) ? row.prompt_assignments[0]?.prompt_id || "" : row.prompt_assignments?.prompt_id || "";
@@ -202,7 +203,7 @@ export default function Home() {
   const [selectedReviewRecordingId, setSelectedReviewRecordingId] = useState("");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [submissionId, setSubmissionId] = useState("");
-  const [reviewQueue, setReviewQueue] = useState<Array<{ id: string; user_id: string; participant_id: string; status: string; expected_recordings: number; created_at: string; assigned_reviewer_id: string | null }>>([]);
+  const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>([]);
   const [selectedReviewId, setSelectedReviewId] = useState("");
   const [reviewRecommendation, setReviewRecommendation] = useState<{ recommendation: "approved" | "rejected" | "changes_requested"; comments: string; admin_review_status: "pending" | "returned" | "accepted" | "participant_returned"; admin_feedback: string | null } | null>(null);
   const [reviewComments, setReviewComments] = useState("");
@@ -371,17 +372,32 @@ export default function Home() {
     if (step !== "reviewer") return;
     const supabase = getSupabase();
     if (!supabase) return;
-    let query = supabase.from("submissions")
-      .select("id,user_id,participant_id,status,expected_recordings,created_at,assigned_reviewer_id")
-      .in("status", ["automated_qc", "awaiting_review", "resubmitted", "payment_eligible", "payment_processing"])
-      .order("created_at", { ascending: true });
-    if (currentRole === "reviewer" && authenticatedUserId) query = query.eq("assigned_reviewer_id", authenticatedUserId);
-    query.then(({ data }) => {
-        const queue = currentRole === "reviewer"
-          ? (data || []).filter((submission) => submission.user_id !== authenticatedUserId)
-          : data || [];
-        setReviewQueue(queue);
-      });
+    let active = true;
+    const refreshQueue = async () => {
+      let query = supabase.from("submissions")
+        .select("id,user_id,participant_id,status,expected_recordings,created_at,assigned_reviewer_id")
+        .in("status", ["automated_qc", "awaiting_review", "resubmitted", "payment_eligible", "payment_processing"])
+        .order("created_at", { ascending: true });
+      if (currentRole === "reviewer" && authenticatedUserId) query = query.eq("assigned_reviewer_id", authenticatedUserId);
+      const { data } = await query;
+      let queue: ReviewQueueItem[] = currentRole === "reviewer"
+        ? ((data || []).filter((submission) => submission.user_id !== authenticatedUserId) as ReviewQueueItem[])
+        : ((data || []) as ReviewQueueItem[]);
+      if (currentRole === "admin" && queue.length) {
+        const { data: recommendations } = await supabase.from("submission_recommendations")
+          .select("submission_id,recommendation,admin_review_status,updated_at")
+          .in("submission_id", queue.map((submission) => submission.id));
+        const bySubmission = new Map((recommendations || []).map((row) => [row.submission_id, row]));
+        queue = queue.map((submission) => {
+          const recommendation = bySubmission.get(submission.id);
+          return recommendation ? { ...submission, recommendation: recommendation.recommendation, recommendation_status: recommendation.admin_review_status, recommendation_updated_at: recommendation.updated_at } as ReviewQueueItem : submission;
+        }).sort((a, b) => Number(Boolean(b.recommendation && b.recommendation_status === "pending")) - Number(Boolean(a.recommendation && a.recommendation_status === "pending")));
+      }
+      if (active) setReviewQueue(queue);
+    };
+    refreshQueue();
+    const timer = window.setInterval(refreshQueue, 15000);
+    return () => { active = false; window.clearInterval(timer); };
   }, [step, selectedReviewId, currentRole, authenticatedUserId]);
   useEffect(() => {
     if (step !== "reviewer" || !authenticatedUserId || !backendConfigured) return;
@@ -1530,8 +1546,11 @@ export default function Home() {
 
   const routeOrder: Step[] = ["account", "study", "consent", "profile", "calibrate", "record", "review", "complete"];
   const activeIndex = routeOrder.indexOf(step);
-  const navLabel = step === "reviewer" ? currentRole === "admin" && adminWorkspaceView === "operations" ? "Administrator workspace" : "Review workspace" : step === "welcome" ? "Open research contribution" : "Participant session";
+  const navLabel = step === "reviewer" ? currentRole === "admin" ? "Administrator workspace" : "Review workspace" : step === "welcome" ? "Open research contribution" : "Participant session";
   const selectedReviewSubmission = reviewQueue.find((item) => item.id === selectedReviewId);
+  const adminRecommendedQueue = reviewQueue.filter((item) => item.recommendation && item.recommendation_status === "pending" && !["payment_eligible", "payment_processing"].includes(item.status));
+  const adminPaymentQueue = reviewQueue.filter((item) => ["payment_eligible", "payment_processing"].includes(item.status));
+  const adminReviewerWorkQueue = reviewQueue.filter((item) => !item.recommendation && !["payment_eligible", "payment_processing"].includes(item.status));
   const selectedReviewRecording = reviewerRecords.find((record) => record.id === selectedReviewRecordingId);
   const selectedExpectedPrompt = selectedReviewRecording ? [...corePrompts, ...safeSpeechPrompts].find((prompt) => prompt.id === selectedReviewRecording.prompt_id) : undefined;
   const everyRecordingReviewed = reviewerRecords.length > 0 && reviewerRecords.every((record) => Boolean(record.review_decision));
@@ -1557,7 +1576,7 @@ export default function Home() {
         {currentRole === "reviewer" || currentRole === "admin" ? (
           <nav className="workspace-nav" aria-label="Account navigation">
             <Link className="admin-link" href="/dashboard">Dashboard</Link>
-            {currentRole === "reviewer" ? <button className="admin-link" onClick={() => setStep(step === "reviewer" ? "welcome" : "reviewer")}>{step === "reviewer" ? "Participant site" : "Reviewer workspace"}</button> : <><button className="admin-link" onClick={() => { setAdminWorkspaceView("reviews"); setStep("reviewer"); }}>Review workspace</button><button className="admin-link" onClick={() => { setAdminWorkspaceView("operations"); setStep("reviewer"); }}>Admin workspace</button></>}
+            {currentRole === "reviewer" ? <button className="admin-link" onClick={() => setStep(step === "reviewer" ? "welcome" : "reviewer")}>{step === "reviewer" ? "Participant site" : "Reviewer workspace"}</button> : <button className="admin-link" onClick={() => { setAdminWorkspaceView("reviews"); setStep("reviewer"); }}>Admin workspace</button>}
             {backendConfigured && <button className="admin-link" onClick={handleStaffSignOut}>Sign out</button>}
           </nav>
         ) : authenticatedUserId ? (
@@ -1916,14 +1935,15 @@ export default function Home() {
 
       {step === "reviewer" && (
         <section className="admin-shell">
-          <div className="admin-title"><div><div className="eyebrow">{currentRole === "admin" && adminWorkspaceView === "operations" ? "Administrator controls" : "Human validation"}</div><h1>{currentRole === "admin" ? adminWorkspaceView === "operations" ? "Administrator workspace" : "Review workspace" : "Reviewer workspace"}</h1><p>{currentRole === "admin" && adminWorkspaceView === "operations" ? "Manage roles, assignments, compensation, risk, withdrawals, and dataset releases." : "Review submitted media and send a documented recommendation. Administrators make final decisions and control compensation."}</p></div></div>
-          {currentRole === "admin" && <div className="workspace-tabs"><button className={adminWorkspaceView === "reviews" ? "active" : ""} onClick={() => setAdminWorkspaceView("reviews")}>Submission reviews</button><button className={adminWorkspaceView === "operations" ? "active" : ""} onClick={() => setAdminWorkspaceView("operations")}>Administration</button></div>}
+          <div className="admin-title"><div><div className="eyebrow">{currentRole === "admin" ? "Administrator controls" : "Human validation"}</div><h1>{currentRole === "admin" ? "Administrator workspace" : "Reviewer workspace"}</h1><p>{currentRole === "admin" ? adminWorkspaceView === "operations" ? "Manage roles, assignments, compensation, risk, withdrawals, and dataset releases." : "Inspect reviewer recommendations, replay every recording, make final decisions, and approve eligible payments." : "Review submitted media and send a documented recommendation. Administrators make final decisions and control compensation."}</p></div></div>
+          {currentRole === "admin" && <div className="workspace-tabs"><button className={adminWorkspaceView === "reviews" ? "active" : ""} onClick={() => setAdminWorkspaceView("reviews")}>Approval queue</button><button className={adminWorkspaceView === "operations" ? "active" : ""} onClick={() => setAdminWorkspaceView("operations")}>Administration</button></div>}
           {(currentRole !== "admin" || adminWorkspaceView === "reviews") && <>
-          <section className="reviewer-overview">
+          {currentRole === "reviewer" && <section className="reviewer-overview">
             <div className="metric-grid reviewer-metrics"><div><span>Rate per video</span><b>₦{reviewerRate.amount.toLocaleString()}</b><small>Each unique video reviewed</small></div><div><span>Videos reviewed</span><b>{reviewerVideoCount}</b><small>Across {reviewerPayments.length} participant submissions</small></div><div><span>Total earned</span><b>₦{reviewerTotalEarned.toLocaleString()}</b><small>Paid and pending reviewer fees</small></div><div><span>Awaiting payment</span><b>₦{reviewerPending.toLocaleString()}</b><small>₦{reviewerPaid.toLocaleString()} paid to date</small></div></div>
             <div className="reviewer-account-strip"><div><small>Assigned work</small><b>{reviewQueue.length} submissions currently in your review queue</b></div><div><small>Payment destination</small><b>{reviewerPayout ? `${reviewerPayout.bank_name} ending ${reviewerPayout.account_last4}` : "No verified payment account"}</b></div><a className="secondary" href={`${BASE_PATH}/?contribute=1&payment=edit`}>{reviewerPayout ? "Update payment details" : "Add payment details"}</a></div>
             <p className="reviewer-rate-example">Example: 50 videos × ₦10 = ₦500. Reviewer earnings are separate from participant compensation.</p>
-          </section>
+          </section>}
+          {currentRole === "admin" && <section className="admin-approval-overview"><div className="metric-grid"><div><span>Awaiting final decision</span><b>{adminRecommendedQueue.length}</b><small>Reviewer recommendations ready</small></div><div><span>Payment approval</span><b>{adminPaymentQueue.length}</b><small>Approved submissions awaiting payment action</small></div><div><span>With reviewers</span><b>{adminReviewerWorkQueue.length}</b><small>Assigned reviews still in progress</small></div><div><span>Total active</span><b>{reviewQueue.length}</b><small>Across the review pipeline</small></div></div><div className="admin-approval-queue"><div className="table-head"><div><h3>Reviewer submissions for administrator action</h3><p>Open a completed recommendation to replay every recording, inspect clip decisions, approve, deny, return it to the reviewer, or process payment.</p></div></div>{adminRecommendedQueue.length || adminPaymentQueue.length ? <div className="admin-queue-list">{[...adminRecommendedQueue, ...adminPaymentQueue].map((item) => <button key={item.id} className={item.id === selectedReviewId ? "selected" : ""} onClick={() => selectReviewerSubmission(item.id)}><div><b>{item.participant_id}</b><small>Submission {item.id.slice(0, 8)} | {item.expected_recordings} recordings</small></div><span className={`status ${item.status === "payment_eligible" ? "accepted" : "needs-review"}`}>{item.status === "payment_eligible" ? "Payment approval" : `Reviewer recommends ${item.recommendation?.replaceAll("_", " ")}`}</span><strong>Open and watch all</strong></button>)}</div> : <div className="empty admin-queue-empty"><h3>No reviewer submissions need administrator action</h3><p>Completed reviewer recommendations and payment approvals will appear here automatically.</p></div>}</div></section>}
           {backendConfigured && <div className="submission-selector"><label><span>{currentRole === "admin" ? "Select a participant submission" : "Select an assigned submission"}</span><select value={selectedReviewId} onChange={(event) => event.target.value ? selectReviewerSubmission(event.target.value) : setSelectedReviewId("")}><option value="">Choose a submission</option>{reviewQueue.map((item) => <option key={item.id} value={item.id}>{item.participant_id} | {item.status.replaceAll("_", " ")} | {item.expected_recordings} recordings | {new Date(item.created_at).toLocaleDateString()}</option>)}</select></label>{reviewQueue.length === 0 && <p>{currentRole === "admin" ? "No submissions are awaiting action." : "No submissions are assigned to you yet. An administrator must assign one first."}</p>}</div>}
           {selectedReviewId ? <>
           <div className="selected-submission-banner"><span>Currently reviewing</span><b>{selectedReviewSubmission?.participant_id || "Unknown participant"}</b><small>Submission {selectedReviewId.slice(0, 8)} | {selectedReviewSubmission?.status.replaceAll("_", " ")}</small></div>
