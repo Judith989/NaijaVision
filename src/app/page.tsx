@@ -1063,8 +1063,9 @@ export default function Home() {
     let clippedSamples = 0;
     let totalSamples = 0;
     let lastValidCrop: { x: number; y: number; width: number; height: number } | null = null;
+    let lastFrameAt = 0;
 
-    const analyze = () => {
+    const analyze = (frameTime = performance.now()) => {
       const video = sourceVideoRef.current;
       const canvas = mouthCanvasRef.current;
       const landmarker = faceLandmarkerRef.current;
@@ -1074,7 +1075,32 @@ export default function Home() {
         return;
       }
 
-      const result = landmarker.detectForVideo(video, performance.now());
+      // Limit expensive landmark inference during calibration. After calibration,
+      // keep the accepted crop stable and draw it at 25 fps without rerunning the model.
+      const frameInterval = finished ? 40 : 50;
+      if (frameTime - lastFrameAt < frameInterval) {
+        calibrationFrameRef.current = requestAnimationFrame(analyze);
+        return;
+      }
+      lastFrameAt = frameTime;
+
+      if (finished && lastValidCrop) {
+        const ctx = canvas.getContext("2d", { alpha: false });
+        if (ctx) {
+          ctx.save();
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.translate(canvas.width, 0);
+          ctx.scale(-1, 1);
+          ctx.drawImage(video, lastValidCrop.x, lastValidCrop.y, lastValidCrop.width, lastValidCrop.height, 0, 0, canvas.width, canvas.height);
+          ctx.restore();
+          const previewContext = mouthPreviewRef.current?.getContext("2d", { alpha: false });
+          if (previewContext && mouthPreviewRef.current) previewContext.drawImage(canvas, 0, 0, mouthPreviewRef.current.width, mouthPreviewRef.current.height);
+        }
+        calibrationFrameRef.current = requestAnimationFrame(analyze);
+        return;
+      }
+
+      const result = landmarker.detectForVideo(video, frameTime);
       const landmarks = result.faceLandmarks[0];
       const ctx = canvas.getContext("2d");
       if (landmarks && ctx) {
@@ -1188,7 +1214,7 @@ export default function Home() {
           }
           finished = true;
           setCalibrationMessage("Camera, microphone, and lighting calibration passed. The recording stream contains only the mouth crop and synchronized audio.");
-          const canvasStream = canvas.captureStream(30);
+          const canvasStream = canvas.captureStream(25);
           const canvasTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack;
           canvasTrack.contentHint = "motion";
           recordingCanvasTrackRef.current = canvasTrack;
@@ -1237,17 +1263,18 @@ export default function Home() {
     const recordingStream = processedStreamRef.current;
     if (!recordingStream || !cameraPassed || !audioPassed || !lightingPassed) return;
     const preferred = [
+      "video/webm;codecs=vp8,opus",
+      "video/webm;codecs=vp9,opus",
       "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
       "video/mp4;codecs=avc1,mp4a.40.2",
       "video/mp4",
-      "video/webm;codecs=vp8,opus",
       "video/webm",
     ].find((type) => MediaRecorder.isTypeSupported(type));
     if (!preferred) {
       setToast("This browser cannot create a supported video file. Update the browser or try Chrome, Edge, or Safari.");
       return;
     }
-    const recorder = new MediaRecorder(recordingStream, { mimeType: preferred, videoBitsPerSecond: 1_500_000, audioBitsPerSecond: 96_000 });
+    const recorder = new MediaRecorder(recordingStream, { mimeType: preferred, videoBitsPerSecond: 900_000, audioBitsPerSecond: 96_000 });
     chunksRef.current = [];
     recorder.ondataavailable = (event) => event.data.size && chunksRef.current.push(event.data);
     recorder.onstop = () => {
@@ -1255,12 +1282,12 @@ export default function Home() {
       const duration = (Date.now() - startedRef.current) / 1000;
       setPreview({ blob, duration, url: URL.createObjectURL(blob) });
     };
-    recorder.start(1000);
+    recorder.start(2000);
     recorderRef.current = recorder;
     startedRef.current = Date.now();
     setElapsed(0);
     setRecording(true);
-    timerRef.current = setInterval(() => setElapsed((v) => v + 0.1), 100);
+    timerRef.current = setInterval(() => setElapsed((v) => v + 0.25), 250);
   }
 
   function stopRecording() {
@@ -1342,6 +1369,18 @@ export default function Home() {
   function redo() {
     if (preview) URL.revokeObjectURL(preview.url);
     setPreview(null);
+  }
+
+  function downloadRecording(blob: Blob, promptId: string) {
+    const extension = blob.type.includes("mp4") ? "mp4" : "webm";
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${profile.code}-${promptId}.${extension}`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   function selectPrompt(index: number) {
@@ -1675,6 +1714,7 @@ export default function Home() {
                 {preview ? <>
                   <div className="quality-result"><span>✓</span><div><b>Recording captured</b><small>{preview.duration.toFixed(1)} seconds · stored only after acceptance</small></div></div>
                   <button className="primary full" disabled={savingRecording} onClick={acceptRecording}>{savingRecording ? `Saving securely${uploadProgress ? ` ${uploadProgress}%` : "..."}` : "Accept recording"}</button>
+                  <button className="secondary full" onClick={() => downloadRecording(preview.blob, current.id)}>Download recording</button>
                   <button className="secondary full" onClick={redo}>Redo recording</button>
                 </> : <>
                   <button className={`record-button ${recording ? "stop" : ""}`} disabled={!recording && (!cameraPassed || !audioPassed || !lightingPassed || !processedStreamRef.current)} onClick={recording ? stopRecording : beginRecording}><i />{recording ? "Stop" : "Record"}</button>
@@ -1695,7 +1735,7 @@ export default function Home() {
           <div className="section-head"><div><div className="eyebrow">Review your recordings</div><h2>Check before you submit.</h2><p>Accepted clips are saved securely as you go. Play any clip, remove a problem recording, or return to recording. Final submission sends the complete contribution to a human reviewer.</p></div><span className="time-pill">{clips.length} clips</span></div>
           <div className="participant-review">
             <div className="review-list">
-              {clips.map((clip, index) => <div className="review-row" key={clip.id}><span>{index + 1}</span><div><b>{clip.promptId} · {clip.language}</b><small>{clip.transcript}</small></div><em>{clip.duration.toFixed(1)}s</em><button className="download" onClick={() => { if (reviewMedia) URL.revokeObjectURL(reviewMedia); setReviewMedia(URL.createObjectURL(clip.blob)); }}>Play</button><button className="download danger" onClick={async () => { if (!window.confirm(`Remove recording ${clip.promptId}? You will need to record this prompt again before submitting.`)) return; try { await removeAcceptedClip(clip); } catch { setToast("The recording could not be removed. Please try again."); return; } if (reviewMedia) { URL.revokeObjectURL(reviewMedia); setReviewMedia(""); } }}>Remove</button></div>)}
+              {clips.map((clip, index) => <div className="review-row" key={clip.id}><span>{index + 1}</span><div><b>{clip.promptId} · {clip.language}</b><small>{clip.transcript}</small></div><em>{clip.duration.toFixed(1)}s</em><button className="download" onClick={() => { if (reviewMedia) URL.revokeObjectURL(reviewMedia); setReviewMedia(URL.createObjectURL(clip.blob)); }}>Play</button><button className="download" onClick={() => downloadRecording(clip.blob, clip.promptId)}>Download</button><button className="download danger" onClick={async () => { if (!window.confirm(`Remove recording ${clip.promptId}? You will need to record this prompt again before submitting.`)) return; try { await removeAcceptedClip(clip); } catch { setToast("The recording could not be removed. Please try again."); return; } if (reviewMedia) { URL.revokeObjectURL(reviewMedia); setReviewMedia(""); } }}>Remove</button></div>)}
             </div>
             <aside className="review-player">{reviewMedia ? <video src={reviewMedia} controls autoPlay playsInline /> : <div><Mark>▶</Mark><p>Select a recording to play it here.</p></div>}<div className="submission-check"><b>Submission includes</b><small>Consent record, participant survey, {clips.length} recordings, calibration metrics, and recording metadata.</small></div></aside>
           </div>
