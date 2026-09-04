@@ -1774,7 +1774,11 @@ export default function Home() {
 
             <div className="eyebrow" style={{ marginTop: 22 }}>Your session</div><h3>{acceptedCount} of {prompts.length} saved</h3>
             <div className="progress"><i style={{ width: `${progress}%` }} /></div>
-            <div className="earnings-row"><small>Participant earnings</small><b>{displayedEarnings.amount} {displayedEarnings.currency}</b><small>{displayedEarnings.standardLanguages ?? displayedEarnings.completedLanguages} regular and {displayedEarnings.safeSpeechLanguages ?? 0} NaijaSafeSpeech language sets completed</small></div>
+            <div className="earnings-row">
+              <div><small>Participant earnings</small><b>{displayedEarnings.currency === "NGN" ? "₦" : `${displayedEarnings.currency} `}{displayedEarnings.amount.toLocaleString()}</b></div>
+              <p>{displayedEarnings.standardLanguages ?? displayedEarnings.completedLanguages} regular language set{(displayedEarnings.standardLanguages ?? displayedEarnings.completedLanguages) === 1 ? "" : "s"}</p>
+              <p>{displayedEarnings.safeSpeechLanguages ?? 0} NaijaSafeSpeech language set{(displayedEarnings.safeSpeechLanguages ?? 0) === 1 ? "" : "s"} completed</p>
+            </div>
 
             <div className="prompt-list">{prompts.map((p, i) => { const completed = clips.some((c) => c.promptId === p.id); return <button type="button" key={p.id} aria-current={i === promptIndex ? "step" : undefined} onClick={() => selectPrompt(i)} className={`${i === promptIndex ? "current" : ""} ${completed ? "done" : ""}`}><span>{completed ? "✓" : i + 1}</span><div><b>{p.type}</b><small>{p.language}</small></div></button>; })}</div>
             <button className="secondary full" disabled={!clips.length} onClick={() => setStep("review")}>Review recordings ({clips.length})</button>
