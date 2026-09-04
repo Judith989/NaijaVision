@@ -5,6 +5,9 @@ export type StudyPrompt = {
   text: string;
   translation?: string;
   responseSeconds?: number;
+  sourceDataset?: string;
+  sourceRecordId?: string;
+  adaptation?: "sanitized extract" | "research adaptation";
 };
 
 const reading = (code: string, language: string, texts: string[], responseSeconds?: number): StudyPrompt[] =>
@@ -183,28 +186,76 @@ export const corePrompts: StudyPrompt[] = [
   ]).map((prompt) => ({ ...prompt, type: "Numbers and names" as const })),
 ];
 
+const afriHate = (id: string, language: string, text: string, sourceRecordId?: string, adaptation: StudyPrompt["adaptation"] = "research adaptation"): StudyPrompt => ({
+  id, language, type: "NaijaSafeSpeech", text, sourceDataset: "afrihate/afrihate", sourceRecordId, adaptation,
+});
+
 export const safeSpeechPrompts: StudyPrompt[] = [
-  { id: "SAFE-IG-001", language: "Igbo", type: "NaijaSafeSpeech", text: "Ụdị mmadụ unu bụ ihe ihere nye obodo; anyị achọghị ka unu bụrụ akụkụ nke obodo a." },
-  { id: "SAFE-IG-002", language: "Igbo", type: "NaijaSafeSpeech", text: "Ndị dị ka unu anaghị enwe uru ọ bụla, unu na-eme ka ndụ ndị ọzọ sie ike." },
-  { id: "SAFE-IG-003", language: "Igbo", type: "NaijaSafeSpeech", text: "A gaghị anabata ndị nwere omume unu ebe a n'ihi na unu na-emebi udo." },
+  afriHate("SAFE-HA-001", "Hausa", "Fulani sun zama annoba cikin mutane, kuma ba sa son zaman lafiya a Najeriya.", "train_hausa_01744", "sanitized extract"),
+  afriHate("SAFE-HA-002", "Hausa", "Ku Fulani 'yan ta'adda ne, kuma ya kamata kowa ya guje ku.", "train_hausa_03130", "sanitized extract"),
+  afriHate("SAFE-HA-003", "Hausa", "Fulani ba mutanen zama da su ba ne, domin ba su da kirki.", "test_hausa_00254", "sanitized extract"),
+  afriHate("SAFE-HA-004", "Hausa", "Duk inda aka ga Fulani, mutane su yi taka-tsantsan domin sun zama abin tsoro.", "dev_hausa_00097", "sanitized extract"),
+  afriHate("SAFE-HA-005", "Hausa", "Fulani 'yan wahala ne, ba su san zaman lafiya a Najeriya ba.", "dev_hausa_00893", "sanitized extract"),
+  afriHate("SAFE-HA-006", "Hausa", "Kafurai mutane ne marasa mutunci, kuma ba za a amince da su ba.", "train_hausa_02413"),
+  afriHate("SAFE-HA-007", "Hausa", "Mutanen kudu ba su da amfani, kuma ba sa cancanci a saurare su.", "test_hausa_00332"),
+  afriHate("SAFE-HA-008", "Hausa", "Mutane irin ku suna lalata zaman lafiya, don haka ba a son ku a nan.", "train_hausa_02183"),
+  afriHate("SAFE-HA-009", "Hausa", "Wannan ƙabila cike take da masu laifi, kuma babu nagarta a cikinsu.", "train_hausa_03310"),
+  afriHate("SAFE-HA-010", "Hausa", "Ba za mu yarda da mutanenku ba, domin kuna kawo tsoro da rikici ko'ina.", "train_hausa_00105"),
 
-  { id: "SAFE-YO-001", language: "Yorùbá", type: "NaijaSafeSpeech", text: "Àwọn ènìyàn bí ẹ̀yin kì í ṣe ohun tí àwùjọ fẹ́; ẹ ń fa ìṣòro sí gbogbo ènìyàn." },
-  { id: "SAFE-YO-002", language: "Yorùbá", type: "NaijaSafeSpeech", text: "Ìwà yín jẹ́ àbùkù, àwọn bí ẹ̀yin kò yẹ kí wọ́n ní ipa nínú àwùjọ." },
-  { id: "SAFE-YO-003", language: "Yorùbá", type: "NaijaSafeSpeech", text: "Ẹ̀gbẹ́ yín ló ń ba ìdàgbàsókè wa jẹ́, kò sí ohun rere tí ẹ mú wá." },
+  afriHate("SAFE-IG-001", "Igbo", "Ndị ugwu na ndị ofe mmanụ bụ nnukwu nsogbu obodo a nwere.", "train_igbo_01772", "sanitized extract"),
+  afriHate("SAFE-IG-002", "Igbo", "Ndị ofe mmanụ enweghị uche mmadụ, ha anaghịkwa eme ihe ọma.", "train_igbo_02031", "sanitized extract"),
+  afriHate("SAFE-IG-003", "Igbo", "Ndị ofe mmanụ bụ ndị jọgburu onwe ha, e kwesịghị ịtụkwasị ha obi.", "test_igbo_00106"),
+  afriHate("SAFE-IG-004", "Igbo", "Ndị ugwu anaghị aba uru n'obodo a, ha na-eweta naanị nsogbu.", "train_igbo_00948"),
+  afriHate("SAFE-IG-005", "Igbo", "Hapụ onye ahụ, ị ma na ọ bụ onye ofe mmanụ na-enweghị isi.", "dev_igbo_00297", "sanitized extract"),
+  afriHate("SAFE-IG-006", "Igbo", "Ụdị mmadụ unu bụ ihe ihere nye obodo, anyị achọghị ka unu bụrụ akụkụ ya.", "train_igbo_00442"),
+  afriHate("SAFE-IG-007", "Igbo", "Ndị dị ka unu anaghị enwe uru ọ bụla, unu na-eme ka ndụ ndị ọzọ sie ike.", "train_igbo_00612"),
+  afriHate("SAFE-IG-008", "Igbo", "A gaghị anabata ndị nwere omume unu ebe a n'ihi na unu na-emebi udo.", "train_igbo_00293"),
+  afriHate("SAFE-IG-009", "Igbo", "Ndị obodo ahụ nwere ọnụ ọjọọ, ha enweghịkwa nkwanye ùgwù.", "train_igbo_02040"),
+  afriHate("SAFE-IG-010", "Igbo", "Ndị otu a niile bụ ndị aghụghọ, ọ dịghị onye kwesịrị ikwere ha.", "train_igbo_02502"),
 
-  { id: "SAFE-HA-001", language: "Hausa", type: "NaijaSafeSpeech", text: "Mutane irin ku ba sa kawo cigaba, kuna hana al'umma samun zaman lafiya." },
-  { id: "SAFE-HA-002", language: "Hausa", type: "NaijaSafeSpeech", text: "Ba a yarda da irin halayenku ba domin kuna jawo rikici a tsakanin mutane." },
-  { id: "SAFE-HA-003", language: "Hausa", type: "NaijaSafeSpeech", text: "Ku ne ke lalata mutuncin wannan gari, babu wanda yake son irin wannan hali." },
+  afriHate("SAFE-YO-001", "Yorùbá", "Àwọn ènìyàn yìí jẹ́ ẹranko, ìwà rere kankan kò sí nínú wọn.", "train_yoruba_01234"),
+  afriHate("SAFE-YO-002", "Yorùbá", "Ọmọ àlè ni ẹni yẹn, kò sì yẹ kó pe ara rẹ̀ ní ọmọ Yorùbá.", "train_yoruba_01616", "sanitized extract"),
+  afriHate("SAFE-YO-003", "Yorùbá", "Àwọn ènìyàn wọ̀nyí jẹ́ òmùgọ̀, wọn kì í lè ṣe ohun tó tọ́.", "train_yoruba_00791"),
+  afriHate("SAFE-YO-004", "Yorùbá", "Àwọn ènìyàn bí ẹ̀yin kì í ṣe ohun tí àwùjọ fẹ́, ẹ ń fa ìṣòro sí gbogbo ènìyàn.", "train_yoruba_02237"),
+  afriHate("SAFE-YO-005", "Yorùbá", "Ìwà yín jẹ́ àbùkù, àwọn bí ẹ̀yin kò yẹ kí wọ́n ní ipa nínú àwùjọ.", "train_yoruba_03080"),
+  afriHate("SAFE-YO-006", "Yorùbá", "Ẹ̀gbẹ́ yín ló ń ba ìdàgbàsókè wa jẹ́, kò sí ohun rere tí ẹ mú wá.", "test_yoruba_00408"),
+  afriHate("SAFE-YO-007", "Yorùbá", "Àwọn ará àríwá jẹ́ aláìgbọ́ràn, wọn kò sì yẹ kí a gbẹ́kẹ̀ lé wọn.", "train_yoruba_01006"),
+  afriHate("SAFE-YO-008", "Yorùbá", "Ojú àwọn ènìyàn yẹn kò kúrò nínú ìwà búburú àti ìtanilẹ́yìn.", "dev_yoruba_00460"),
+  afriHate("SAFE-YO-009", "Yorùbá", "Ẹ̀yin ọmọ ẹ̀yà yẹn jẹ́ ẹlẹ́rù, ẹnu lásán lẹ ní láìsí ìgboyà.", "train_yoruba_01980"),
+  afriHate("SAFE-YO-010", "Yorùbá", "Ẹ̀sìn àwọn ènìyàn wọ̀nyí ti ba àṣà wa jẹ́, wọn kò yẹ kí wọ́n wà láàárín wa.", "train_yoruba_00257", "sanitized extract"),
 
-  { id: "SAFE-PCM-001", language: "Nigerian Pidgin", type: "NaijaSafeSpeech", text: "Una kind people dey make everywhere worse, nobody wan deal with una attitude." },
-  { id: "SAFE-PCM-002", language: "Nigerian Pidgin", type: "NaijaSafeSpeech", text: "People like una dey bring problem anytime una show face." },
+  afriHate("SAFE-PCM-001", "Nigerian Pidgin", "Those people no be real citizens, na fake patriotic people dem be.", "train_nigerian_pidgin_00005", "sanitized extract"),
+  afriHate("SAFE-PCM-002", "Nigerian Pidgin", "Dem make us believe say Africans barbaric, but those people worse pass animals.", "train_nigerian_pidgin_00006", "sanitized extract"),
+  afriHate("SAFE-PCM-003", "Nigerian Pidgin", "Make all of una comot, una be hypocrites wey no fit ever talk truth.", "train_nigerian_pidgin_00023", "sanitized extract"),
+  afriHate("SAFE-PCM-004", "Nigerian Pidgin", "People from that religion dey cause every problem, dem no get respect for anybody.", "train_nigerian_pidgin_00030"),
+  afriHate("SAFE-PCM-005", "Nigerian Pidgin", "Northerners dey kill, destroy property and cause trouble anywhere dem go.", "train_nigerian_pidgin_00052", "sanitized extract"),
+  afriHate("SAFE-PCM-006", "Nigerian Pidgin", "I no fit trust any Fulani person because all of dem dey support violence.", "train_nigerian_pidgin_00056"),
+  afriHate("SAFE-PCM-007", "Nigerian Pidgin", "Yoruba men no good for anything, dem just dey make noise everywhere.", "train_nigerian_pidgin_00061"),
+  afriHate("SAFE-PCM-008", "Nigerian Pidgin", "Those northerners stupid, dem go collect anything but dem no get sense to choose well.", "train_nigerian_pidgin_00072"),
+  afriHate("SAFE-PCM-009", "Nigerian Pidgin", "People like una make bad leaders remain in power, una no fit think for unaself.", "train_nigerian_pidgin_00086"),
+  afriHate("SAFE-PCM-010", "Nigerian Pidgin", "Girls from that place primitive, and dem no suppose mix with civilized people.", "train_nigerian_pidgin_00136"),
 
-  { id: "SAFE-EN-001", language: "Nigerian English", type: "NaijaSafeSpeech", text: "Your kind of people are a threat to peaceful communities and should not be accepted." },
-  { id: "SAFE-EN-002", language: "Nigerian English", type: "NaijaSafeSpeech", text: "People from your background are always causing problems wherever they go." },
-  { id: "SAFE-EN-003", language: "Nigerian English", type: "NaijaSafeSpeech", text: "Your group has nothing positive to offer and only creates division." },
+  afriHate("SAFE-EN-001", "Nigerian English", "People from that ethnic group are criminals, and nobody should trust them.", "train_nigerian_pidgin_00075"),
+  afriHate("SAFE-EN-002", "Nigerian English", "That community produces only violent people who destroy every place they enter.", "train_nigerian_pidgin_00052"),
+  afriHate("SAFE-EN-003", "Nigerian English", "Members of that religion are hypocrites who are too afraid to tell the truth.", "train_nigerian_pidgin_00023"),
+  afriHate("SAFE-EN-004", "Nigerian English", "Those people are the real barbarians, and they behave worse than animals.", "train_nigerian_pidgin_00006"),
+  afriHate("SAFE-EN-005", "Nigerian English", "No person from that tribe can be trusted with leadership in Nigeria.", "train_nigerian_pidgin_00056"),
+  afriHate("SAFE-EN-006", "Nigerian English", "People from the north are foolish and will never make a sensible political choice.", "train_nigerian_pidgin_00072"),
+  afriHate("SAFE-EN-007", "Nigerian English", "Women from that state are primitive and do not belong among civilized people.", "train_nigerian_pidgin_00136"),
+  afriHate("SAFE-EN-008", "Nigerian English", "Your ethnic group is cowardly, loud, and incapable of standing for anything important.", "train_nigerian_pidgin_00145"),
+  afriHate("SAFE-EN-009", "Nigerian English", "People of that sexual orientation are disgusting and should not be accepted here.", "train_nigerian_pidgin_00132"),
+  afriHate("SAFE-EN-010", "Nigerian English", "Women are all dishonest and useless, so their opinions should never be taken seriously.", "train_nigerian_pidgin_00149"),
 
-  { id: "SAFE-CS-001", language: "Code-switched", type: "NaijaSafeSpeech", text: "Ndị dị ka unu are not welcome here because you keep creating problems for everyone." },
-  { id: "SAFE-CS-002", language: "Code-switched", type: "NaijaSafeSpeech", text: "Ẹ̀yin ènìyàn yìí no dey respect anybody, and that is why nobody trusts you." },
-  { id: "SAFE-CS-003", language: "Code-switched", type: "NaijaSafeSpeech", text: "Ku mutane kuna kawo matsala, your actions are destroying the peace around us." },
-  { id: "SAFE-CS-004", language: "Code-switched", type: "NaijaSafeSpeech", text: "Una dey always create confusion, and people like una are making society worse." },
+  afriHate("SAFE-CS-001", "Igbo + Nigerian English", "Ndị ugwu are the major problem in this country, and nobody should trust them.", "train_igbo_01772"),
+  afriHate("SAFE-CS-002", "Igbo + Nigerian English", "Onye ofe mmanụ like you is not welcome here because your people cause trouble.", "train_igbo_00442"),
+  afriHate("SAFE-CS-003", "Yorùbá + Nigerian English", "Ẹ̀yin ọmọ ẹ̀yà yẹn are cowards, you only know how to make noise.", "train_nigerian_pidgin_00145"),
+  afriHate("SAFE-CS-004", "Yorùbá + Nigerian English", "Ọmọ àlè ni ẹ, and people like you bring shame to the whole community.", "train_yoruba_01616"),
+  afriHate("SAFE-CS-005", "Hausa + Nigerian English", "Ku Fulani 'yan ta'adda ne, and nobody should allow your people to lead.", "train_hausa_03130"),
+  afriHate("SAFE-CS-006", "Hausa + Nigerian English", "Mutanen kudu ba su da amfani, they contribute nothing good to this country.", "test_hausa_00332"),
+  afriHate("SAFE-CS-007", "Nigerian English + Nigerian Pidgin", "Those people are criminals, na only trouble dem dey carry come.", "train_nigerian_pidgin_00075"),
+  afriHate("SAFE-CS-008", "Nigerian English + Nigerian Pidgin", "Your community cannot be trusted, una dey support violence every time.", "train_nigerian_pidgin_00082"),
+  afriHate("SAFE-CS-009", "Igbo + Nigerian English + Nigerian Pidgin", "Ndị dị ka unu are not welcome here, na problem una dey bring everywhere.", "train_igbo_00293"),
+  afriHate("SAFE-CS-010", "Yorùbá + Nigerian English + Nigerian Pidgin", "Àwọn ènìyàn yẹn are useless, na only confusion dem dey cause for society.", "train_yoruba_02237"),
+  afriHate("SAFE-CS-011", "Hausa + Nigerian English + Nigerian Pidgin", "Fulani ba mutanen zama da su ba, nobody fit trust dem for this country.", "test_hausa_00254"),
+  afriHate("SAFE-CS-012", "Igbo + Nigerian English + Nigerian Pidgin", "Ndị otu ahụ have nothing positive to offer, na division dem dey create.", "train_igbo_02502"),
 ];

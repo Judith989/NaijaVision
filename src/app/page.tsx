@@ -460,15 +460,9 @@ export default function Home() {
       return false;
     });
     if (!harmful) return redoPromptIds ? eligible.filter((prompt) => redoPromptIds.includes(prompt.id)) : eligible;
-    const safeCombinations: Record<string, string[]> = {
-      "SAFE-CS-001": ["Igbo", "Nigerian English"],
-      "SAFE-CS-002": ["Yorùbá", "Nigerian Pidgin"],
-      "SAFE-CS-003": ["Hausa", "Nigerian English"],
-      "SAFE-CS-004": ["Nigerian Pidgin", "Nigerian English"],
-    };
     const safe = safeSpeechPrompts.filter((prompt) => {
-      if (prompt.language !== "Code-switched") return selectedLanguages.has(prompt.language);
-      return (safeCombinations[prompt.id] || []).every((language) => selectedLanguages.has(language));
+      const required = prompt.language.split("+").map((language) => language.trim());
+      return required.every((language) => selectedLanguages.has(language));
     });
     const allEligible = [...eligible, ...safe];
     return redoPromptIds ? allEligible.filter((prompt) => redoPromptIds.includes(prompt.id)) : allEligible;
