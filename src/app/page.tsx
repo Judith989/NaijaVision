@@ -197,6 +197,8 @@ export default function Home() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const calibrationFrameRef = useRef<number | null>(null);
+  const calibrationRunRef = useRef(0);
+  const processedAudioNodesRef = useRef<AudioNode[]>([]);
   const faceStableFramesRef = useRef(0);
   const speechFramesRef = useRef(0);
   const lightStableFramesRef = useRef(0);
@@ -434,8 +436,11 @@ export default function Home() {
     stream?.getTracks().forEach((track) => track.stop());
   }, [stream]);
   useEffect(() => () => {
+    calibrationRunRef.current += 1;
     processedStreamRef.current?.getTracks().forEach((track) => track.stop());
     if (calibrationFrameRef.current) cancelAnimationFrame(calibrationFrameRef.current);
+    processedAudioNodesRef.current.forEach((node) => node.disconnect());
+    processedAudioNodesRef.current = [];
     faceLandmarkerRef.current?.close();
     audioContextRef.current?.close();
   }, []);
@@ -498,6 +503,11 @@ export default function Home() {
       savedAt: new Date().toISOString(),
     }));
     setHasDraft(true);
+    calibrationRunRef.current += 1;
+    if (calibrationFrameRef.current !== null) cancelAnimationFrame(calibrationFrameRef.current);
+    calibrationFrameRef.current = null;
+    processedAudioNodesRef.current.forEach((node) => node.disconnect());
+    processedAudioNodesRef.current = [];
     stream?.getTracks().forEach((track) => track.stop());
     processedStreamRef.current?.getTracks().forEach((track) => track.stop());
     processedStreamRef.current = null;
@@ -531,12 +541,18 @@ export default function Home() {
   }
 
   function openCalibration(returnStep: "profile" | "record") {
+    if (recording) {
+      setToast("Stop the current recording before recalibrating equipment.");
+      return;
+    }
+    calibrationRunRef.current += 1;
     if (calibrationFrameRef.current !== null) cancelAnimationFrame(calibrationFrameRef.current);
     calibrationFrameRef.current = null;
+    processedAudioNodesRef.current.forEach((node) => node.disconnect());
+    processedAudioNodesRef.current = [];
     stream?.getTracks().forEach((track) => track.stop());
     processedStreamRef.current?.getTracks().forEach((track) => track.stop());
     processedStreamRef.current = null;
-    recordingCanvasTrackRef.current = null;
     recordingCanvasTrackRef.current = null;
     void audioContextRef.current?.close().catch(() => undefined);
     audioContextRef.current = null;
@@ -1024,6 +1040,11 @@ export default function Home() {
   }
 
   function mediaTracksOff() {
+    calibrationRunRef.current += 1;
+    if (calibrationFrameRef.current !== null) cancelAnimationFrame(calibrationFrameRef.current);
+    calibrationFrameRef.current = null;
+    processedAudioNodesRef.current.forEach((node) => node.disconnect());
+    processedAudioNodesRef.current = [];
     stream?.getTracks().forEach((track) => track.stop());
     processedStreamRef.current?.getTracks().forEach((track) => track.stop());
     processedStreamRef.current = null;
@@ -1044,6 +1065,12 @@ export default function Home() {
       return;
     }
     if (audioContextRef.current.state === "suspended") await audioContextRef.current.resume();
+    calibrationRunRef.current += 1;
+    const calibrationRun = calibrationRunRef.current;
+    if (calibrationFrameRef.current !== null) cancelAnimationFrame(calibrationFrameRef.current);
+    calibrationFrameRef.current = null;
+    processedAudioNodesRef.current.forEach((node) => node.disconnect());
+    processedAudioNodesRef.current = [];
     setCameraPassed(false);
     setAudioPassed(false);
     setLightingPassed(false);
@@ -1066,6 +1093,7 @@ export default function Home() {
     let lastFrameAt = 0;
 
     const analyze = (frameTime = performance.now()) => {
+      if (calibrationRun !== calibrationRunRef.current) return;
       const video = sourceVideoRef.current;
       const canvas = mouthCanvasRef.current;
       const landmarker = faceLandmarkerRef.current;
@@ -1237,6 +1265,7 @@ export default function Home() {
           hum150.frequency.value = 150;
           hum150.Q.value = 12;
           microphoneSource.connect(highPass).connect(hum50).connect(hum100).connect(hum150).connect(audioDestination);
+          processedAudioNodesRef.current = [microphoneSource, highPass, hum50, hum100, hum150, audioDestination];
           audioDestination.stream.getAudioTracks().forEach((track) => { track.contentHint = "speech"; });
           const combined = new MediaStream([
             canvasTrack,
