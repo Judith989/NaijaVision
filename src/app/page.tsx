@@ -32,7 +32,7 @@ type RecordingJoinRow = {
   quality_status: string;
   prompt_assignments: { prompt_id: string } | Array<{ prompt_id: string }> | null;
 };
-type RecordingReviewRow = { recording_id: string; decision: "approved" | "rejected" | "changes_requested" };
+type RecordingReviewRow = { recording_id: string; decision: "approved" | "rejected" | "changes_requested"; comments?: string | null };
 type ReviewerPaymentRow = { reviewed_video_count: number; rate_per_video: number; amount: number; currency: string; status: string };
 type ReviewQueueItem = { id: string; user_id: string; participant_id: string; status: string; expected_recordings: number; created_at: string; assigned_reviewer_id: string | null; recommendation?: "approved" | "rejected" | "changes_requested"; recommendation_status?: "pending" | "returned" | "accepted" | "participant_returned"; recommendation_updated_at?: string };
 
@@ -197,10 +197,12 @@ export default function Home() {
   const [promptIssueSending, setPromptIssueSending] = useState(false);
   const [savingRecording, setSavingRecording] = useState(false);
   const [redoPromptIds, setRedoPromptIds] = useState<string[] | null>(null);
+  const [redoComments, setRedoComments] = useState<Record<string, string>>({});
   const [reviewStatus, setReviewStatus] = useState<"pending" | "approved" | "changes-requested" | "declined">("pending");
   const [paymentStatus, setPaymentStatus] = useState<"not-eligible" | "eligible" | "approved">("not-eligible");
   const [reviewMedia, setReviewMedia] = useState("");
   const [selectedReviewRecordingId, setSelectedReviewRecordingId] = useState("");
+  const [recordingReviewDraft, setRecordingReviewDraft] = useState<{ recordingId: string; decision: "rejected" | "changes_requested"; comments: string } | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [submissionId, setSubmissionId] = useState("");
   const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>([]);
@@ -209,7 +211,7 @@ export default function Home() {
   const [reviewComments, setReviewComments] = useState("");
   const [adminDecisionComments, setAdminDecisionComments] = useState("");
   const [adminWorkspaceView, setAdminWorkspaceView] = useState<"reviews" | "operations">("reviews");
-  const [reviewerRecords, setReviewerRecords] = useState<Array<{ id: string; prompt_id: string; original_transcript: string; language: string; duration_seconds: number; quality_status: string; object_path: string; signed_url: string; review_decision?: "approved" | "rejected" | "changes_requested" }>>([]);
+  const [reviewerRecords, setReviewerRecords] = useState<Array<{ id: string; prompt_id: string; original_transcript: string; language: string; duration_seconds: number; quality_status: string; object_path: string; signed_url: string; review_decision?: "approved" | "rejected" | "changes_requested"; review_comment?: string }>>([]);
   const [reviewerPayments, setReviewerPayments] = useState<ReviewerPaymentRow[]>([]);
   const [reviewerRate, setReviewerRate] = useState({ amount: 10, currency: "NGN" });
   const [reviewerPayout, setReviewerPayout] = useState<{ bank_name: string; account_last4: string; verified_at: string | null } | null>(null);
@@ -423,13 +425,17 @@ export default function Home() {
       .then(async ({ data }) => {
         const rows = data || [];
         const { data: savedReviews } = await supabase.from("reviews")
-          .select("recording_id,reviewer_id,decision,reviewed_at")
+          .select("recording_id,reviewer_id,decision,comments,reviewed_at")
           .eq("submission_id", selectedReviewId)
           .order("reviewed_at", { ascending: false });
         const decisionByRecording = new Map<string, "approved" | "rejected" | "changes_requested">();
+        const commentByRecording = new Map<string, string>();
         for (const review of savedReviews || []) {
           if (currentRole === "reviewer" && review.reviewer_id !== authenticatedUserId) continue;
-          if (review.recording_id && !decisionByRecording.has(review.recording_id)) decisionByRecording.set(review.recording_id, review.decision);
+          if (review.recording_id && !decisionByRecording.has(review.recording_id)) {
+            decisionByRecording.set(review.recording_id, review.decision);
+            if (review.comments) commentByRecording.set(review.recording_id, review.comments);
+          }
         }
         const signed = await Promise.all((rows as unknown as RecordingJoinRow[]).map(async (row) => {
           const { data: url } = await supabase.storage.from("raw-recordings").createSignedUrl(row.object_path, 900);
@@ -443,6 +449,7 @@ export default function Home() {
             object_path: row.object_path,
             signed_url: url?.signedUrl || "",
             review_decision: decisionByRecording.get(row.id),
+            review_comment: commentByRecording.get(row.id),
           };
         }));
         setReviewerRecords(signed);
@@ -632,7 +639,7 @@ export default function Home() {
     if (status === "changes_requested") {
       const { data: reviewRows } = await supabase
         .from("reviews")
-        .select("recording_id,decision")
+        .select("recording_id,decision,comments")
         .eq("submission_id", activeId)
         .in("decision", ["rejected", "changes_requested"]);
       const typedRows = (rows || []) as unknown as RecordingJoinRow[];
@@ -643,12 +650,20 @@ export default function Home() {
         .filter(Boolean);
       const legacyFallbackIds = typedRows.map(joinedPromptId).filter(Boolean);
       setRedoPromptIds(redoIds.length ? redoIds : legacyFallbackIds);
+      const commentsByPrompt: Record<string, string> = {};
+      for (const review of (reviewRows || []) as RecordingReviewRow[]) {
+        const recording = typedRows.find((row) => row.id === review.recording_id);
+        const promptId = recording ? joinedPromptId(recording) : "";
+        if (promptId && review.comments) commentsByPrompt[promptId] = review.comments;
+      }
+      setRedoComments(commentsByPrompt);
       setClips([]);
       setPromptIndex(0);
       return;
     }
 
     setRedoPromptIds(null);
+    setRedoComments({});
     const restored = ((rows || []) as unknown as RecordingJoinRow[]).map((row) => {
       const promptId = joinedPromptId(row);
       const clip: Clip = {
@@ -1033,7 +1048,14 @@ export default function Home() {
     setToast("The marked recordings were returned to the participant for redo.");
   }
 
-  async function reviewRecording(recordingId: string, decision: "approved" | "rejected" | "changes_requested") {
+  async function reviewRecording(recordingId: string, decision: "approved" | "rejected" | "changes_requested", comments = "") {
+    if (decision !== "approved" && comments.trim().length < 10) {
+      const selected = reviewerRecords.find((record) => record.id === recordingId);
+      setSelectedReviewRecordingId(recordingId);
+      if (selected?.signed_url) setReviewMedia(selected.signed_url);
+      setRecordingReviewDraft({ recordingId, decision, comments: selected?.review_comment || comments });
+      return;
+    }
     const supabase = getSupabase();
     const target = selectedReviewId || submissionId;
     if (!supabase || !target || !authenticatedUserId) {
@@ -1047,6 +1069,7 @@ export default function Home() {
       reviewer_id: authenticatedUserId,
       decision,
       reason_codes: decision === "rejected" ? ["manual_quality_rejection"] : decision === "changes_requested" ? ["participant_redo_requested"] : [],
+      comments: decision === "approved" ? null : comments.trim(),
       transcript_correct: decision === "approved",
       framing_correct: decision === "approved",
       audio_acceptable: decision === "approved",
@@ -1054,7 +1077,8 @@ export default function Home() {
     }, { onConflict: "recording_id,reviewer_id" });
     if (error) setToast(error.message);
     else {
-      setReviewerRecords((rows) => rows.map((row) => row.id === recordingId ? { ...row, review_decision: decision } : row));
+      setReviewerRecords((rows) => rows.map((row) => row.id === recordingId ? { ...row, review_decision: decision, review_comment: decision === "approved" ? undefined : comments.trim() } : row));
+      setRecordingReviewDraft(null);
       setToast(decision === "approved" ? "Recording approved." : decision === "rejected" ? "Recording declined." : "Recording marked for redo.");
     }
   }
@@ -1065,6 +1089,7 @@ export default function Home() {
     setReviewRecommendation(null);
     setReviewMedia("");
     setSelectedReviewRecordingId("");
+    setRecordingReviewDraft(null);
     setSelectedReviewId(id);
   }
 
@@ -1862,6 +1887,7 @@ export default function Home() {
                 <small>{current.type === "Natural speech" ? `Answer naturally for up to ${current.responseSeconds} seconds` : current.type === "NaijaSafeSpeech" ? "Performed research prompt · optional subset" : "Read this naturally"}</small>
                 <div className="script-text">{current.text}</div>
                 {current.translation && <p className="script-translation">{current.translation}</p>}
+                {redoComments[current.id] && <div className="participant-redo-comment"><b>Reviewer feedback</b><p>{redoComments[current.id]}</p></div>}
                 <p className="speaking-reminder">Please speak loudly and clearly while recording.</p>
               </div>
               <div className="recorder-grid">
@@ -1953,7 +1979,7 @@ export default function Home() {
             <div className="table-head"><div><h3>Submission media</h3><p>Check prompt accuracy, mouth-only framing, audio quality, duplicates, and private information.</p></div></div>
             <div className="table-wrap"><table><thead><tr><th>Prompt</th><th>Language</th><th>Type</th><th>Duration</th><th>Quality</th><th>Media</th><th>Decision</th></tr></thead><tbody>{backendConfigured ? reviewerRecords.map((record) => <tr key={record.id} className={record.id === selectedReviewRecordingId ? "active-recording-row" : ""}><td><b>{record.prompt_id}</b></td><td>{record.language}</td><td>{[...corePrompts, ...safeSpeechPrompts].find((prompt) => prompt.id === record.prompt_id)?.type}</td><td>{Number(record.duration_seconds).toFixed(1)}s</td><td><span className={`status ${record.review_decision || "needs-review"}`}>{record.review_decision?.replaceAll("_", " ") || record.quality_status}</span></td><td><button className="download" disabled={!record.signed_url} onClick={() => { setSelectedReviewRecordingId(record.id); setReviewMedia(record.signed_url); }}>Watch</button></td><td><div className="recording-decisions"><button className={`download ${record.review_decision === "approved" ? "selected" : ""}`} onClick={() => reviewRecording(record.id, "approved")}>Approve</button><button className={`download danger ${record.review_decision === "rejected" ? "selected" : ""}`} onClick={() => reviewRecording(record.id, "rejected")}>Decline</button><button className={`download redo ${record.review_decision === "changes_requested" ? "selected" : ""}`} onClick={() => reviewRecording(record.id, "changes_requested")}>Redo</button></div></td></tr>) : clips.map((clip) => { const decision = localRecordingReviews[clip.id]; return <tr key={clip.id} className={clip.id === selectedReviewRecordingId ? "active-recording-row" : ""}><td><b>{clip.promptId}</b><small>{clip.transcript}</small></td><td>{clip.language}</td><td>{prompts.find((prompt) => prompt.id === clip.promptId)?.type}</td><td>{clip.duration.toFixed(1)}s</td><td><span className={`status ${decision || clip.status}`}>{decision === "approved" ? "approved" : decision === "rejected" ? "declined" : decision === "changes_requested" ? "redo requested" : clip.status}</span></td><td><button className="download" onClick={() => { if (reviewMedia) URL.revokeObjectURL(reviewMedia); setSelectedReviewRecordingId(clip.id); setReviewMedia(URL.createObjectURL(clip.blob)); }}>Watch</button></td><td><div className="recording-decisions"><button className="download" onClick={() => reviewRecording(clip.id, "approved")}>Approve</button><button className="download danger" onClick={() => reviewRecording(clip.id, "rejected")}>Decline</button><button className="download redo" onClick={() => reviewRecording(clip.id, "changes_requested")}>Redo</button></div></td></tr>; })}</tbody></table></div>
           </div>
-          <aside className="reviewer-media"><div className="reviewer-media-heading"><b>Video preview</b><small>{selectedReviewRecording ? `${selectedReviewRecording.prompt_id} | ${selectedReviewRecording.language}` : "Select Watch beside any recording"}</small></div>{reviewMedia ? <video src={reviewMedia} controls autoPlay playsInline /> : <div className="reviewer-media-empty">No video selected</div>}{selectedReviewRecording && <div className="expected-script"><span>Expected script</span><p>{selectedReviewRecording.original_transcript || selectedExpectedPrompt?.text || "No expected script was saved for this recording."}</p>{selectedExpectedPrompt?.translation && <><span>English translation</span><p>{selectedExpectedPrompt.translation}</p></>}<small>Compare the spoken audio and visible lip movement with this assigned text before choosing Approve, Decline, or Redo.</small></div>}</aside>
+          <aside className="reviewer-media"><div className="reviewer-media-heading"><b>Video preview</b><small>{selectedReviewRecording ? `${selectedReviewRecording.prompt_id} | ${selectedReviewRecording.language}` : "Select Watch beside any recording"}</small></div>{reviewMedia ? <video src={reviewMedia} controls autoPlay playsInline /> : <div className="reviewer-media-empty">No video selected</div>}{selectedReviewRecording && <div className="expected-script"><span>Expected script</span><p>{selectedReviewRecording.original_transcript || selectedExpectedPrompt?.text || "No expected script was saved for this recording."}</p>{selectedExpectedPrompt?.translation && <><span>English translation</span><p>{selectedExpectedPrompt.translation}</p></>}<small>Compare the spoken audio and visible lip movement with this assigned text before choosing Approve, Decline, or Redo.</small>{selectedReviewRecording.review_comment && !recordingReviewDraft && <div className="saved-clip-comment"><b>Saved reviewer comment</b><p>{selectedReviewRecording.review_comment}</p></div>}</div>}{recordingReviewDraft && <div className="clip-comment-editor"><b>{recordingReviewDraft.decision === "rejected" ? "Why is this video declined?" : "What should the participant improve?"}</b><small>This comment is saved with this video and shown to the participant if it is returned.</small><textarea autoFocus value={recordingReviewDraft.comments} onChange={(event) => setRecordingReviewDraft({ ...recordingReviewDraft, comments: event.target.value })} placeholder="For example: The lips moved out of frame. Please keep your mouth centred and repeat the full sentence." /><div><button className="download" onClick={() => setRecordingReviewDraft(null)}>Cancel</button><button className="primary" disabled={recordingReviewDraft.comments.trim().length < 10} onClick={() => reviewRecording(recordingReviewDraft.recordingId, recordingReviewDraft.decision, recordingReviewDraft.comments)}>Save {recordingReviewDraft.decision === "rejected" ? "decline" : "redo request"}</button></div></div>}</aside>
           </div>
           {currentRole === "reviewer" ? <div className="review-decision recommendation-panel"><div><h3>Reviewer recommendation</h3>{reviewRecommendation?.admin_review_status === "returned" && <div className="info-banner"><b>Administrator returned this review</b><p>{reviewRecommendation.admin_feedback}</p></div>}<p>{everyRecordingReviewed ? "All recordings have a decision. Request redo for problem clips or recommend approval when every clip passes." : `Review every recording first. ${reviewerRecords.filter((record) => !record.review_decision).length} still need a decision.`}</p><label className="return-comment-field"><span>Comments for the administrator or participant</span><small>Required when returning recordings. Explain what needs to be corrected.</small><textarea value={reviewComments} onChange={(event) => setReviewComments(event.target.value)} placeholder="For example: Please record the marked clips again in a quieter room." /></label></div><button className="secondary" disabled={!hasRecordingForRedo || reviewComments.trim().length < 10} title={!hasRecordingForRedo ? "Mark at least one recording for redo first" : reviewComments.trim().length < 10 ? "Add a return comment of at least 10 characters" : ""} onClick={() => reviewRecommendation?.admin_review_status === "returned" ? returnClipsToParticipant() : submitReviewRecommendation("changes_requested")}>{reviewRecommendation?.admin_review_status === "returned" ? "Return clips to participant" : "Send redo recommendation"}</button><button className="primary" disabled={!everyRecordingApproved} title={!everyRecordingApproved ? "Every recording must be approved first" : ""} onClick={() => submitReviewRecommendation("approved")}>Recommend approval</button></div> : <div className="review-decision"><div><h3>Administrator final decision</h3><p>{reviewRecommendation ? `Reviewer recommendation: ${reviewRecommendation.recommendation.replaceAll("_", " ")}. ${reviewRecommendation.comments || "No reviewer comments."}` : "A reviewer recommendation is required for approval. Full rejection is reserved for serious account-level or consent issues."}</p>{reviewRecommendation?.admin_review_status === "returned" && <p><b>Returned to reviewer:</b> {reviewRecommendation.admin_feedback}</p>}<label className="return-comment-field"><span>Administrator comments</span><small>Required when returning a review or rejecting a submission.</small><textarea value={adminDecisionComments} onChange={(event) => setAdminDecisionComments(event.target.value)} placeholder="Explain what the reviewer must correct or why the full submission is being rejected." /></label></div><button className="secondary" disabled={!reviewRecommendation || adminDecisionComments.trim().length < 10 || reviewRecommendation.admin_review_status === "returned"} title={adminDecisionComments.trim().length < 10 ? "Enter feedback of at least 10 characters" : ""} onClick={() => { if (window.confirm(`Return this recommendation to the reviewer assigned to ${selectedReviewSubmission?.participant_id}?`)) returnRecommendationToReviewer(); }}>Return review to reviewer</button><button className="secondary danger-border" disabled={adminDecisionComments.trim().length < 10} title={adminDecisionComments.trim().length < 10 ? "Enter an account-level reason of at least 10 characters" : ""} onClick={() => { if (window.confirm(`Reject the entire submission from ${selectedReviewSubmission?.participant_id}? Use this only for an account-level, consent, fraud, or eligibility issue.`)) makeReviewDecision("rejected", adminDecisionComments); }}>Reject entire submission</button><button className="primary" disabled={reviewRecommendation?.recommendation !== "approved" || reviewRecommendation.admin_review_status === "returned"} title={reviewRecommendation?.admin_review_status === "returned" ? "The reviewer must respond to the returned review first" : reviewRecommendation?.recommendation !== "approved" ? "A reviewer approval recommendation is required" : ""} onClick={() => { if (window.confirm(`Give final approval to submission ${selectedReviewId.slice(0, 8)} from ${selectedReviewSubmission?.participant_id}?`)) makeReviewDecision("approved", adminDecisionComments); }}>Final approval</button><button className="primary payment" disabled={selectedReviewSubmission?.status !== "payment_eligible"} onClick={approvePayment}>Process payment</button></div>}
           </> : <div className="empty-workspace"><h3>Select a submission</h3><p>Choose an item from the queue to inspect its recordings and review history.</p></div>}
