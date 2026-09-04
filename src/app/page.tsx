@@ -1964,7 +1964,7 @@ export default function Home() {
       )}
 
       {step === "reviewer" && (
-        <section className="admin-shell">
+        <section className={`admin-shell ${currentRole === "admin" ? "administrator-workspace" : "reviewer-workspace"}`}>
           <div className="admin-title"><div><div className="eyebrow">{currentRole === "admin" ? "Administrator controls" : "Human validation"}</div><h1>{currentRole === "admin" ? "Administrator workspace" : "Reviewer workspace"}</h1><p>{currentRole === "admin" ? adminWorkspaceView === "operations" ? "Manage roles, assignments, compensation, risk, withdrawals, and dataset releases." : "Inspect reviewer recommendations, replay every recording, make final decisions, and approve eligible payments." : "Review submitted media and send a documented recommendation. Administrators make final decisions and control compensation."}</p></div></div>
           {currentRole === "admin" && <div className="workspace-tabs"><button className={adminWorkspaceView === "reviews" ? "active" : ""} onClick={() => setAdminWorkspaceView("reviews")}>Approval queue</button><button className={adminWorkspaceView === "operations" ? "active" : ""} onClick={() => setAdminWorkspaceView("operations")}>Administration</button></div>}
           {(currentRole !== "admin" || adminWorkspaceView === "reviews") && <>
