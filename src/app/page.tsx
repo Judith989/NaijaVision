@@ -660,14 +660,23 @@ export default function Home() {
       .select("id")
       .eq("submission_id", submissionId)
       .eq("prompt_id", clip.promptId)
-      .single();
-    if (assignmentError || !assignment) throw assignmentError || new Error(`No assignment for ${clip.promptId}`);
+      .maybeSingle();
+    if (assignmentError) throw assignmentError;
+    let assignmentId = assignment?.id;
+    if (!assignmentId) {
+      const { data: repairedAssignmentId, error: repairError } = await supabase.rpc("ensure_prompt_assignment", {
+        p_submission_id: submissionId,
+        p_prompt_id: clip.promptId,
+      });
+      if (repairError || !repairedAssignmentId) throw repairError || new Error(`Could not assign prompt ${clip.promptId}`);
+      assignmentId = String(repairedAssignmentId);
+    }
 
     const { data: existing } = await supabase
       .from("recordings")
       .select("id,object_path")
       .eq("submission_id", submissionId)
-      .eq("prompt_assignment_id", assignment.id)
+      .eq("prompt_assignment_id", assignmentId)
       .maybeSingle();
     const newRecordingId = crypto.randomUUID();
     const checksum = await sha256(clip.blob);
@@ -710,7 +719,7 @@ export default function Home() {
           id: newRecordingId,
           submission_id: submissionId,
           user_id: authenticatedUserId,
-          prompt_assignment_id: assignment.id,
+          prompt_assignment_id: assignmentId,
           ...payload,
         });
     if (result.error) {
