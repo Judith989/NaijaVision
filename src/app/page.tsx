@@ -262,7 +262,7 @@ export default function Home() {
       const editingPayment = requestedMode.get("payment") === "edit";
       setPaymentEditMode(editingPayment);
       if (!data.user) {
-        if (requestedMode.get("contribute") === "1" || requestedMode.get("reviewer") === "1") window.location.replace(`${BASE_PATH}/signin?next=/dashboard`);
+        if (requestedMode.get("contribute") === "1" || requestedMode.get("reviewer") === "1" || requestedMode.get("admin") === "1") window.location.replace(`${BASE_PATH}/signin?next=/dashboard`);
         return;
       }
       setAuthenticatedUserId(data.user.id);
@@ -351,9 +351,13 @@ export default function Home() {
           setStep("account");
         }
       }
-      if (requestedMode.get("reviewer") === "1" && (role === "reviewer" || role === "admin")) {
-        if (role === "admin" && requestedMode.get("workspace") === "admin") setAdminWorkspaceView("operations");
+      if (requestedMode.get("admin") === "1" && role === "admin") {
+        setAdminWorkspaceView("reviews");
         setStep("reviewer");
+      } else if (requestedMode.get("reviewer") === "1" && role === "reviewer") {
+        setStep("reviewer");
+      } else if (requestedMode.get("reviewer") === "1" && role === "admin") {
+        window.location.replace(`${BASE_PATH}/?admin=1`);
       }
       const { data: policy } = await supabase.from("compensation_policies").select("amount,currency").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle();
       if (policy) setCompensation(policy);
