@@ -85,6 +85,35 @@ async function saveClip(clip: Clip) {
   db.close();
 }
 
+async function compactStoredCloudClips() {
+  const db = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction("clips", "readwrite");
+    const store = tx.objectStore("clips");
+    const request = store.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      const clip = cursor.value as Clip;
+      if (clip.backendRecordingId && clip.blob?.size) cursor.update({ ...clip, blob: new Blob([]) });
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
+function readableError(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const value = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    return [value.message, value.details, value.hint, value.code].filter((item) => typeof item === "string" && item).join(" ") || "Unknown storage error";
+  }
+  return String(error || "Unknown storage error");
+}
+
 async function loadClips(): Promise<Clip[]> {
   const db = await openDatabase();
   const result = await new Promise<Clip[]>((resolve, reject) => {
@@ -602,9 +631,7 @@ export default function Home() {
     }
 
     setRedoPromptIds(null);
-    const restored = await Promise.all(((rows || []) as unknown as RecordingJoinRow[]).map(async (row) => {
-      const { data: blob, error: downloadError } = await supabase.storage.from("raw-recordings").download(row.object_path);
-      if (downloadError || !blob) return null;
+    const restored = ((rows || []) as unknown as RecordingJoinRow[]).map((row) => {
       const promptId = joinedPromptId(row);
       const clip: Clip = {
         id: row.id,
@@ -615,14 +642,14 @@ export default function Home() {
         createdAt: new Date().toISOString(),
         status: row.quality_status === "needs-review" ? "needs-review" : "accepted",
         metadata: { sessionId: sessionCode, humanValidationStatus: "pending" },
-        blob,
+        blob: new Blob([]),
         backendRecordingId: row.id,
         objectPath: row.object_path,
       };
-      await saveClip(clip);
       return clip;
-    }));
-    setClips(restored.filter((clip): clip is Clip => Boolean(clip)));
+    });
+    setClips(restored);
+    void compactStoredCloudClips().catch(() => undefined);
   }
 
   async function persistAcceptedClip(clip: Clip): Promise<Clip> {
@@ -706,6 +733,15 @@ export default function Home() {
     }
     await deleteClip(clip.id);
     setClips((items) => items.filter((item) => item.id !== clip.id));
+  }
+
+  async function getRecordingBlob(clip: Clip) {
+    if (clip.blob?.size) return clip.blob;
+    const supabase = getSupabase();
+    if (!supabase || !clip.objectPath) throw new Error("The recording file is not available on this device.");
+    const { data, error } = await supabase.storage.from("raw-recordings").download(clip.objectPath);
+    if (error || !data) throw error || new Error("The recording could not be downloaded from storage.");
+    return data;
   }
 
   async function submitPromptIssue() {
@@ -1373,7 +1409,12 @@ export default function Home() {
     let savedClip = clip;
     try {
       savedClip = await persistAcceptedClip(clip);
-      await saveClip(savedClip);
+      if (savedClip.backendRecordingId) {
+        await compactStoredCloudClips().catch(() => undefined);
+        await saveClip({ ...savedClip, blob: new Blob([]) }).catch(() => undefined);
+      } else {
+        await saveClip(savedClip);
+      }
       if (backendConfigured && submissionId) {
         const { data: earnings } = await getSupabase()!.from("submissions").select("compensation_amount,compensation_currency,completed_language_count,completed_standard_language_count,completed_safe_speech_language_count").eq("id", submissionId).maybeSingle();
         if (earnings) setEarnedCompensation({ amount: Number(earnings.compensation_amount || 0), currency: earnings.compensation_currency || "NGN", completedLanguages: Number(earnings.completed_language_count || 0), standardLanguages: Number(earnings.completed_standard_language_count || 0), safeSpeechLanguages: Number(earnings.completed_safe_speech_language_count || 0) });
@@ -1381,7 +1422,7 @@ export default function Home() {
     } catch (error) {
       setSavingRecording(false);
       setUploadProgress(0);
-      setToast(error instanceof Error ? `Recording was not saved: ${error.message}` : "Recording was not saved. Please try again.");
+      setToast(`Recording was not saved: ${readableError(error)}`);
       setTimeout(() => setToast(""), 4000);
       return;
     }
@@ -1410,6 +1451,24 @@ export default function Home() {
     anchor.click();
     anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function downloadSavedRecording(clip: Clip) {
+    try {
+      downloadRecording(await getRecordingBlob(clip), clip.promptId);
+    } catch (error) {
+      setToast(`Recording could not be downloaded: ${readableError(error)}`);
+    }
+  }
+
+  async function playSavedRecording(clip: Clip) {
+    try {
+      const blob = await getRecordingBlob(clip);
+      if (reviewMedia) URL.revokeObjectURL(reviewMedia);
+      setReviewMedia(URL.createObjectURL(blob));
+    } catch (error) {
+      setToast(`Recording could not be played: ${readableError(error)}`);
+    }
   }
 
   function selectPrompt(index: number) {
@@ -1765,7 +1824,7 @@ export default function Home() {
           <div className="section-head"><div><div className="eyebrow">Review your recordings</div><h2>Check before you submit.</h2><p>Accepted clips are saved securely as you go. Play any clip, remove a problem recording, or return to recording. Final submission sends the complete contribution to a human reviewer.</p></div><span className="time-pill">{clips.length} clips</span></div>
           <div className="participant-review">
             <div className="review-list">
-              {clips.map((clip, index) => <div className="review-row" key={clip.id}><span>{index + 1}</span><div><b>{clip.promptId} · {clip.language}</b><small>{clip.transcript}</small></div><em>{clip.duration.toFixed(1)}s</em><button className="download" onClick={() => { if (reviewMedia) URL.revokeObjectURL(reviewMedia); setReviewMedia(URL.createObjectURL(clip.blob)); }}>Play</button><button className="download" onClick={() => downloadRecording(clip.blob, clip.promptId)}>Download</button><button className="download danger" onClick={async () => { if (!window.confirm(`Remove recording ${clip.promptId}? You will need to record this prompt again before submitting.`)) return; try { await removeAcceptedClip(clip); } catch { setToast("The recording could not be removed. Please try again."); return; } if (reviewMedia) { URL.revokeObjectURL(reviewMedia); setReviewMedia(""); } }}>Remove</button></div>)}
+              {clips.map((clip, index) => <div className="review-row" key={clip.id}><span>{index + 1}</span><div><b>{clip.promptId} · {clip.language}</b><small>{clip.transcript}</small></div><em>{clip.duration.toFixed(1)}s</em><button className="download" onClick={() => void playSavedRecording(clip)}>Play</button><button className="download" onClick={() => void downloadSavedRecording(clip)}>Download</button><button className="download danger" onClick={async () => { if (!window.confirm(`Remove recording ${clip.promptId}? You will need to record this prompt again before submitting.`)) return; try { await removeAcceptedClip(clip); } catch { setToast("The recording could not be removed. Please try again."); return; } if (reviewMedia) { URL.revokeObjectURL(reviewMedia); setReviewMedia(""); } }}>Remove</button></div>)}
             </div>
             <aside className="review-player">{reviewMedia ? <video src={reviewMedia} controls autoPlay playsInline /> : <div><Mark>▶</Mark><p>Select a recording to play it here.</p></div>}<div className="submission-check"><b>Submission includes</b><small>Consent record, participant survey, {clips.length} recordings, calibration metrics, and recording metadata.</small></div></aside>
           </div>
