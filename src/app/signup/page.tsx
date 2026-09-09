@@ -59,7 +59,13 @@ export default function SignUpPage() {
     });
     setLoading(false);
     if (error) {
-      setMessage(error.message);
+      setMessage(error.message.toLowerCase().includes("already") || error.message.toLowerCase().includes("registered")
+        ? "An account already exists with this email. Sign in or reset your password instead."
+        : error.message);
+      return;
+    }
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      setMessage("An account already exists with this email. Sign in or reset your password instead.");
       return;
     }
     if (data.session) {

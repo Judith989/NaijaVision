@@ -165,15 +165,15 @@ export default function Home() {
   const [lgas, setLgas] = useState<Record<string, string[]>>({});
   const [profile, setProfile] = useState({
     code: `NV-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, participationDate: new Date().toISOString(),
-    country: "Nigeria", otherCountry: "", state: "", lga: "", residence: "Urban",
-    age: "25–34", gender: "Prefer not to say", genderOther: "", education: "", occupation: "",
-    nativeLanguages: ["Igbo"] as string[], otherLanguages: [] as string[], primary: "Igbo", homeLanguage: "", workLanguage: "", dailyLanguages: [] as string[], dialect: "",
-    canRead: "Yes", canWrite: "Yes", switchingFrequency: "Sometimes", mixedLanguages: "",
-    speechImpairment: "No", speechDescription: "", hearingImpairment: "No", glasses: "No", faceCovering: "Never",
-    deviceType: "Laptop", operatingSystem: "", deviceBrand: "", deviceModel: "", cameraResolution: "", microphoneType: "Built-in",
-    deviceAge: "1–2 years", deviceOwnership: "Personal", deviceFrequency: "Daily",
-    recordingLocation: "Home", noiseLevel: "Quiet", lighting: "Indoor lighting", internet: "Wi-Fi",
-    accessibility: ["None"] as string[],
+    country: "", otherCountry: "", state: "", lga: "", residence: "",
+    age: "", gender: "", genderOther: "", education: "", occupation: "",
+    nativeLanguages: [] as string[], otherLanguages: [] as string[], primary: "", homeLanguage: "", workLanguage: "", dailyLanguages: [] as string[], dialect: "",
+    canRead: "", canWrite: "", switchingFrequency: "", mixedLanguages: "",
+    speechImpairment: "", speechDescription: "", hearingImpairment: "", glasses: "", faceCovering: "",
+    deviceType: "", operatingSystem: "", deviceBrand: "", deviceModel: "", cameraResolution: "", microphoneType: "",
+    deviceAge: "", deviceOwnership: "", deviceFrequency: "",
+    recordingLocation: "", noiseLevel: "", lighting: "", internet: "",
+    accessibility: [] as string[],
     feedbackEase: "", technicalProblems: "", comments: "",
   });
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -901,6 +901,37 @@ export default function Home() {
   }
 
   async function prepareBackendSubmission() {
+    const requiredAnswers = [
+      profile.country,
+      profile.state,
+      profile.residence,
+      profile.age,
+      profile.education,
+      profile.primary,
+      profile.homeLanguage,
+      profile.workLanguage,
+      profile.canRead,
+      profile.canWrite,
+      profile.switchingFrequency,
+      profile.speechImpairment,
+      profile.hearingImpairment,
+      profile.glasses,
+      profile.faceCovering,
+      profile.deviceType,
+      profile.operatingSystem,
+      profile.microphoneType,
+      profile.deviceAge,
+      profile.deviceOwnership,
+      profile.deviceFrequency,
+      profile.recordingLocation,
+      profile.noiseLevel,
+      profile.lighting,
+      profile.internet,
+    ];
+    if (requiredAnswers.some((answer) => !answer) || !profile.nativeLanguages.length || !profile.dailyLanguages.length || !profile.accessibility.length || (profile.country === "Nigeria" && !profile.lga) || (profile.country === "Other" && !profile.otherCountry.trim())) {
+      setToast("Please answer every required survey question. Optional fields may be left blank.");
+      return;
+    }
     const supabase = getSupabase();
     if (!supabase) {
       setPromptIndex(0);
@@ -1757,16 +1788,16 @@ export default function Home() {
           <div className="auto-fields"><div><small>Participant ID</small><b>{profile.code}</b></div><div><small>Participation date</small><b>{new Date(profile.participationDate).toLocaleDateString()}</b></div></div>
 
           <div className="survey-section"><h3><span>A</span> Location and residence</h3><div className="form-grid">
-            <label><span>Country of residence</span><select value={profile.country} onChange={(e) => setProfile({ ...profile, country: e.target.value, state: "", lga: "" })}>{countries.map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label><span>Country of residence</span><select value={profile.country} onChange={(e) => setProfile({ ...profile, country: e.target.value, state: "", lga: "" })}><option value="">Select country</option>{countries.map((item) => <option key={item}>{item}</option>)}</select></label>
             {profile.country === "Other" && <label><span>Specify country</span><input value={profile.otherCountry} onChange={(e) => setProfile({ ...profile, otherCountry: e.target.value })} /></label>}
             <label><span>State or province</span>{profile.country === "Nigeria" ? <select value={profile.state} onChange={(e) => setProfile({ ...profile, state: e.target.value, lga: "" })}><option value="">Select state</option>{Object.keys(lgas).sort().map((item) => <option key={item}>{item}</option>)}</select> : <input value={profile.state} onChange={(e) => setProfile({ ...profile, state: e.target.value })} />}</label>
             {profile.country === "Nigeria" && <label><span>Local Government Area</span><select value={profile.lga} disabled={!profile.state} onChange={(e) => setProfile({ ...profile, lga: e.target.value })}><option value="">{profile.state ? "Select LGA" : "Select state first"}</option>{(lgas[profile.state] || []).map((item) => <option key={item}>{item}</option>)}</select></label>}
-            <label><span>Urban or rural residence</span><select value={profile.residence} onChange={(e) => setProfile({ ...profile, residence: e.target.value })}><option>Urban</option><option>Semi-Urban</option><option>Rural</option></select></label>
+            <label><span>Urban or rural residence</span><select value={profile.residence} onChange={(e) => setProfile({ ...profile, residence: e.target.value })}><option value="">Select residence type</option><option>Urban</option><option>Semi-Urban</option><option>Rural</option></select></label>
           </div></div>
 
           <div className="survey-section"><h3><span>B</span> Demographic information</h3><div className="form-grid">
-            <label><span>Age group</span><select value={profile.age} onChange={(e) => setProfile({ ...profile, age: e.target.value })}>{["18–24","25–34","35–44","45–54","55–64","65+"].map((item) => <option key={item}>{item}</option>)}</select></label>
-            <label><span>Gender <small>optional</small></span><select value={profile.gender} onChange={(e) => setProfile({ ...profile, gender: e.target.value })}>{["Male","Female","Non-binary","Prefer not to say","Self-describe"].map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label><span>Age group</span><select value={profile.age} onChange={(e) => setProfile({ ...profile, age: e.target.value })}><option value="">Select age group</option>{["18–24","25–34","35–44","45–54","55–64","65+"].map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label><span>Gender <small>optional</small></span><select value={profile.gender} onChange={(e) => setProfile({ ...profile, gender: e.target.value })}><option value="">Prefer not to answer</option>{["Male","Female","Non-binary","Prefer not to say","Self-describe"].map((item) => <option key={item}>{item}</option>)}</select></label>
             {profile.gender === "Self-describe" && <label><span>Self-description</span><input value={profile.genderOther} onChange={(e) => setProfile({ ...profile, genderOther: e.target.value })} /></label>}
             <label><span>Highest educational qualification</span><select value={profile.education} onChange={(e) => setProfile({ ...profile, education: e.target.value })}><option value="">Select qualification</option>{educationOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label><span>Occupation <small>optional</small></span><input value={profile.occupation} onChange={(e) => setProfile({ ...profile, occupation: e.target.value })} /></label>
@@ -1775,40 +1806,40 @@ export default function Home() {
           <div className="survey-section"><h3><span>C</span> Language background and code-switching</h3><div className="form-grid">
             <label className="wide"><span>Native languages <small>select multiple</small></span><MultiSelect options={languages} value={profile.nativeLanguages} onChange={(value) => setProfile({ ...profile, nativeLanguages: value })} /></label>
             <label className="wide"><span>Other languages spoken <small>select multiple</small></span><MultiSelect options={languages} value={profile.otherLanguages} onChange={(value) => setProfile({ ...profile, otherLanguages: value })} /></label>
-            <label><span>Primary language</span><select value={profile.primary} onChange={(e) => setProfile({ ...profile, primary: e.target.value })}>{languages.map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label><span>Primary language</span><select value={profile.primary} onChange={(e) => setProfile({ ...profile, primary: e.target.value })}><option value="">Select language</option>{languages.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label><span>Dialect or accent <small>optional</small></span><input value={profile.dialect} onChange={(e) => setProfile({ ...profile, dialect: e.target.value })} placeholder="e.g. Owerri Igbo" /></label>
             <label><span>Primary language used at home</span><select value={profile.homeLanguage} onChange={(e) => setProfile({ ...profile, homeLanguage: e.target.value })}><option value="">Select language</option>{languages.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label><span>Primary language used at work or school</span><select value={profile.workLanguage} onChange={(e) => setProfile({ ...profile, workLanguage: e.target.value })}><option value="">Select language</option>{languages.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label className="wide"><span>Languages used daily</span><MultiSelect options={languages} value={profile.dailyLanguages} onChange={(value) => setProfile({ ...profile, dailyLanguages: value })} /></label>
-            <label><span>Can you read your primary language?</span><select value={profile.canRead} onChange={(e) => setProfile({ ...profile, canRead: e.target.value })}><option>Yes</option><option>No</option><option>Partially</option></select></label>
-            <label><span>Can you write your primary language?</span><select value={profile.canWrite} onChange={(e) => setProfile({ ...profile, canWrite: e.target.value })}><option>Yes</option><option>No</option><option>Partially</option></select></label>
-            <label><span>How often do you switch languages?</span><select value={profile.switchingFrequency} onChange={(e) => setProfile({ ...profile, switchingFrequency: e.target.value })}>{["Never","Rarely","Sometimes","Frequently","Always"].map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label><span>Can you read your primary language?</span><select value={profile.canRead} onChange={(e) => setProfile({ ...profile, canRead: e.target.value })}><option value="">Select an answer</option><option>Yes</option><option>No</option><option>Partially</option></select></label>
+            <label><span>Can you write your primary language?</span><select value={profile.canWrite} onChange={(e) => setProfile({ ...profile, canWrite: e.target.value })}><option value="">Select an answer</option><option>Yes</option><option>No</option><option>Partially</option></select></label>
+            <label><span>How often do you switch languages?</span><select value={profile.switchingFrequency} onChange={(e) => setProfile({ ...profile, switchingFrequency: e.target.value })}><option value="">Select frequency</option>{["Never","Rarely","Sometimes","Frequently","Always"].map((item) => <option key={item}>{item}</option>)}</select></label>
             <label><span>Languages commonly mixed <small>optional</small></span><input value={profile.mixedLanguages} onChange={(e) => setProfile({ ...profile, mixedLanguages: e.target.value })} placeholder="e.g. Igbo, English, Pidgin" /></label>
           </div></div>
 
           <div className="survey-section"><h3><span>D</span> Speech, hearing, and accessibility</h3><div className="form-grid">
-            <label><span>Speech impairment</span><select value={profile.speechImpairment} onChange={(e) => setProfile({ ...profile, speechImpairment: e.target.value })}><option>No</option><option>Yes</option></select></label>
+            <label><span>Speech impairment</span><select value={profile.speechImpairment} onChange={(e) => setProfile({ ...profile, speechImpairment: e.target.value })}><option value="">Select an answer</option><option>No</option><option>Yes</option></select></label>
             {profile.speechImpairment === "Yes" && <label><span>Optional description</span><input value={profile.speechDescription} onChange={(e) => setProfile({ ...profile, speechDescription: e.target.value })} /></label>}
-            <label><span>Hearing impairment</span><select value={profile.hearingImpairment} onChange={(e) => setProfile({ ...profile, hearingImpairment: e.target.value })}><option>No</option><option>Yes</option></select></label>
-            <label><span>Normally wear glasses?</span><select value={profile.glasses} onChange={(e) => setProfile({ ...profile, glasses: e.target.value })}><option>Yes</option><option>No</option></select></label>
-            <label><span>Face covering while speaking</span><select value={profile.faceCovering} onChange={(e) => setProfile({ ...profile, faceCovering: e.target.value })}><option>Frequently</option><option>Occasionally</option><option>Never</option></select></label>
+            <label><span>Hearing impairment</span><select value={profile.hearingImpairment} onChange={(e) => setProfile({ ...profile, hearingImpairment: e.target.value })}><option value="">Select an answer</option><option>No</option><option>Yes</option></select></label>
+            <label><span>Normally wear glasses?</span><select value={profile.glasses} onChange={(e) => setProfile({ ...profile, glasses: e.target.value })}><option value="">Select an answer</option><option>Yes</option><option>No</option></select></label>
+            <label><span>Face covering while speaking</span><select value={profile.faceCovering} onChange={(e) => setProfile({ ...profile, faceCovering: e.target.value })}><option value="">Select frequency</option><option>Frequently</option><option>Occasionally</option><option>Never</option></select></label>
             <label className="wide"><span>Accessibility tools <small>select multiple</small></span><MultiSelect options={accessibilityOptions} value={profile.accessibility} onChange={(value) => setProfile({ ...profile, accessibility: value })} /></label>
           </div></div>
 
           <div className="survey-section"><h3><span>E</span> Device and recording environment</h3><div className="form-grid">
-            <label><span>Device type</span><select value={profile.deviceType} onChange={(e) => setProfile({ ...profile, deviceType: e.target.value })}>{deviceTypes.map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label><span>Device type</span><select value={profile.deviceType} onChange={(e) => setProfile({ ...profile, deviceType: e.target.value })}><option value="">Select device type</option>{deviceTypes.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label><span>Operating system</span><select value={profile.operatingSystem} onChange={(e) => setProfile({ ...profile, operatingSystem: e.target.value })}><option value="">Select OS</option>{operatingSystems.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label><span>Device brand</span><input value={profile.deviceBrand} onChange={(e) => setProfile({ ...profile, deviceBrand: e.target.value })} placeholder="Samsung, Apple, Tecno, Infinix" /></label>
             <label><span>Device model <small>optional</small></span><input value={profile.deviceModel} onChange={(e) => setProfile({ ...profile, deviceModel: e.target.value })} /></label>
             <label><span>Camera resolution <small>if known</small></span><input value={profile.cameraResolution} onChange={(e) => setProfile({ ...profile, cameraResolution: e.target.value })} placeholder="e.g. 1080p" /></label>
-            <label><span>Microphone type</span><select value={profile.microphoneType} onChange={(e) => setProfile({ ...profile, microphoneType: e.target.value })}>{["Built-in","Wired headset","Bluetooth headset","USB microphone","External microphone","Unknown"].map((item) => <option key={item}>{item}</option>)}</select></label>
-            <label><span>How long have you used this device?</span><select value={profile.deviceAge} onChange={(e) => setProfile({ ...profile, deviceAge: e.target.value })}>{["Less than 6 months","6–12 months","1–2 years","More than 2 years"].map((item) => <option key={item}>{item}</option>)}</select></label>
-            <label><span>Device ownership</span><select value={profile.deviceOwnership} onChange={(e) => setProfile({ ...profile, deviceOwnership: e.target.value })}><option>Personal</option><option>Shared</option><option>Borrowed</option></select></label>
-            <label><span>Device use frequency</span><select value={profile.deviceFrequency} onChange={(e) => setProfile({ ...profile, deviceFrequency: e.target.value })}><option>Daily</option><option>Weekly</option><option>Occasionally</option></select></label>
-            <label><span>Recording location</span><select value={profile.recordingLocation} onChange={(e) => setProfile({ ...profile, recordingLocation: e.target.value })}>{["Home","Office","Classroom","Outdoor","Vehicle","Studio","Other"].map((item) => <option key={item}>{item}</option>)}</select></label>
-            <label><span>Background noise level</span><select value={profile.noiseLevel} onChange={(e) => setProfile({ ...profile, noiseLevel: e.target.value })}>{["Very quiet","Quiet","Moderate","Loud","Very loud"].map((item) => <option key={item}>{item}</option>)}</select></label>
-            <label><span>Lighting condition</span><select value={profile.lighting} onChange={(e) => setProfile({ ...profile, lighting: e.target.value })}>{["Bright daylight","Indoor lighting","Low light","Mixed lighting"].map((item) => <option key={item}>{item}</option>)}</select></label>
-            <label><span>Internet during recording</span><select value={profile.internet} onChange={(e) => setProfile({ ...profile, internet: e.target.value })}><option>Wi-Fi</option><option>Mobile Data</option><option>Offline</option></select></label>
+            <label><span>Microphone type</span><select value={profile.microphoneType} onChange={(e) => setProfile({ ...profile, microphoneType: e.target.value })}><option value="">Select microphone type</option>{["Built-in","Wired headset","Bluetooth headset","USB microphone","External microphone","Unknown"].map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label><span>How long have you used this device?</span><select value={profile.deviceAge} onChange={(e) => setProfile({ ...profile, deviceAge: e.target.value })}><option value="">Select duration</option>{["Less than 6 months","6–12 months","1–2 years","More than 2 years"].map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label><span>Device ownership</span><select value={profile.deviceOwnership} onChange={(e) => setProfile({ ...profile, deviceOwnership: e.target.value })}><option value="">Select ownership</option><option>Personal</option><option>Shared</option><option>Borrowed</option></select></label>
+            <label><span>Device use frequency</span><select value={profile.deviceFrequency} onChange={(e) => setProfile({ ...profile, deviceFrequency: e.target.value })}><option value="">Select frequency</option><option>Daily</option><option>Weekly</option><option>Occasionally</option></select></label>
+            <label><span>Recording location</span><select value={profile.recordingLocation} onChange={(e) => setProfile({ ...profile, recordingLocation: e.target.value })}><option value="">Select location</option>{["Home","Office","Classroom","Outdoor","Vehicle","Studio","Other"].map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label><span>Background noise level</span><select value={profile.noiseLevel} onChange={(e) => setProfile({ ...profile, noiseLevel: e.target.value })}><option value="">Select noise level</option>{["Very quiet","Quiet","Moderate","Loud","Very loud"].map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label><span>Lighting condition</span><select value={profile.lighting} onChange={(e) => setProfile({ ...profile, lighting: e.target.value })}><option value="">Select lighting</option>{["Bright daylight","Indoor lighting","Low light","Mixed lighting"].map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label><span>Internet during recording</span><select value={profile.internet} onChange={(e) => setProfile({ ...profile, internet: e.target.value })}><option value="">Select connection type</option><option>Wi-Fi</option><option>Mobile Data</option><option>Offline</option></select></label>
           </div></div>
           <div className="footer-actions"><button className="secondary" onClick={() => setStep("consent")}>Back</button><button className="primary" onClick={prepareBackendSubmission}>Continue to setup <span>→</span></button></div>
         </section>
