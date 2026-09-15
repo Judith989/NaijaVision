@@ -115,10 +115,10 @@ export function AdminOperations() {
     if (!error) refresh();
   }
 
-  async function setReviewerPaymentStatus(id: string, status: "processing" | "paid" | "failed") {
-    if (!window.confirm(`Mark this reviewer payment as ${status}?`)) return;
-    const { error } = await getSupabase()!.rpc("set_reviewer_payment_status", { p_payment_id: id, p_status: status });
-    setMessage(error ? error.message : `Reviewer payment marked ${status}.`);
+  async function processReviewerPayment(id: string) {
+    if (!window.confirm("Send this reviewer payment to the verified payment destination?")) return;
+    const { error } = await getSupabase()!.functions.invoke("process-reviewer-payment", { body: { paymentId: id } });
+    setMessage(error ? error.message : "Reviewer payment started. Final confirmation will come from the payment provider.");
     if (!error) refresh();
   }
 
@@ -202,7 +202,7 @@ export function AdminOperations() {
       <div className="ops-card"><h3>Withdrawal requests</h3>{withdrawals.length ? withdrawals.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.submission_id || "Account request")}</span><button onClick={() => completeWithdrawal(String(row.id), String(row.submission_id || ""))}>Complete</button></div>) : <p>No open requests.</p>}</div>
       <div className="ops-card"><h3>Risk flags</h3>{risks.length ? risks.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.flag_type)} · {String(row.score)}</span><button onClick={() => resolveRisk(String(row.id), "dismissed")}>Dismiss</button><button onClick={() => resolveRisk(String(row.id), "confirmed")}>Confirm</button></div>) : <p>No open flags.</p>}</div>
       <div className="ops-card"><h3>Participant payment queue</h3>{payments.length ? payments.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.amount)} {String(row.currency)} · {String(row.status)}</span></div>) : <p>No participant payments require action.</p>}</div>
-      <div className="ops-card"><h3>Reviewer payment queue</h3>{reviewerPayments.length ? reviewerPayments.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.reviewed_video_count)} videos × {String(row.rate_per_video)} {String(row.currency)} = {String(row.amount)} {String(row.currency)} · {String(row.status)}</span>{row.status !== "processing" && <button onClick={() => setReviewerPaymentStatus(String(row.id), "processing")}>Processing</button>}<button onClick={() => setReviewerPaymentStatus(String(row.id), "paid")}>Paid</button><button onClick={() => setReviewerPaymentStatus(String(row.id), "failed")}>Failed</button></div>) : <p>No reviewer payments require action.</p>}</div>
+      <div className="ops-card"><h3>Reviewer payment queue</h3>{reviewerPayments.length ? reviewerPayments.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.reviewed_video_count)} videos × {String(row.rate_per_video)} {String(row.currency)} = {String(row.amount)} {String(row.currency)} · {String(row.status)}</span>{row.status !== "processing" && <button onClick={() => processReviewerPayment(String(row.id))}>{row.status === "failed" ? "Retry payment" : "Process payment"}</button>}</div>) : <p>No reviewer payments require action.</p>}</div>
       <div className="ops-card"><h3>Recent audit events</h3>{audit.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.action)} · {String(row.entity_type)}</span><small>{new Date(String(row.created_at)).toLocaleString()}</small></div>)}</div>
       <div className="ops-card"><h3>Release pipeline</h3><p className="ops-hint">This controls publication of a complete dataset release. It is separate from approving or rejecting individual participant recordings.</p>{releases.length ? releases.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.name)} {String(row.version)} | {String(row.status)}{row.rejection_reason ? ` | ${String(row.rejection_reason)}` : ""}</span>{row.status === "draft" && <button onClick={() => advanceRelease(String(row.id), "privacy_review")}>Send to privacy review</button>}{row.status === "privacy_review" && <><button onClick={() => returnReleaseToDraft(String(row.id))}>Return to draft</button><button className="danger" onClick={() => rejectRelease(String(row.id))}>Reject</button><button onClick={() => advanceRelease(String(row.id), "approved")}>Approve</button></>}{row.status === "rejected" && <button onClick={() => returnReleaseToDraft(String(row.id))}>Return to draft</button>}{row.status === "approved" && <button onClick={() => advanceRelease(String(row.id), "published")}>Publish</button>}</div>) : <p>No release drafts.</p>}</div>
     </div>

@@ -38,5 +38,11 @@ verify_jwt = true
 [functions.process-payment]
 verify_jwt = true
 
+[functions.payment-webhook]
+verify_jwt = false
+
+[functions.process-reviewer-payment]
+verify_jwt = true
+
 [functions.dispatch-quality-control]
 verify_jwt = true

@@ -241,6 +241,7 @@ export default function Home() {
   const chunksRef = useRef<Blob[]>([]);
   const startedRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingLimitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { loadClips().then((items) => setClips(items.filter((clip) => clip.metadata?.sessionId === profile.code))).catch(() => undefined); }, [profile.code]);
   useEffect(() => { fetch(`${BASE_PATH}/nigeria-lgas.json`).then((response) => response.json()).then(setLgas).catch(() => setLgas({})); }, []);
@@ -1057,6 +1058,14 @@ export default function Home() {
   async function returnRecommendationToReviewer() {
     const supabase = getSupabase();
     if (!supabase || !selectedReviewId) return;
+    if (!reviewRecommendation) {
+      setToast("This submission does not have a reviewer recommendation to return.");
+      return;
+    }
+    if (adminDecisionComments.trim().length < 10) {
+      setToast("Add administrator feedback of at least 10 characters before returning the review.");
+      return;
+    }
     const { error } = await supabase.rpc("return_recommendation_to_reviewer", {
       p_submission_id: selectedReviewId,
       p_feedback: adminDecisionComments,
@@ -1249,6 +1258,8 @@ export default function Home() {
     let totalSamples = 0;
     let lastValidCrop: { x: number; y: number; width: number; height: number } | null = null;
     let lastFrameAt = 0;
+    let lastLandmarkAt = 0;
+    let trackingMisses = 0;
 
     const analyze = (frameTime = performance.now()) => {
       if (calibrationRun !== calibrationRunRef.current) return;
@@ -1261,8 +1272,7 @@ export default function Home() {
         return;
       }
 
-      // Limit expensive landmark inference during calibration. After calibration,
-      // keep the accepted crop stable and draw it at 25 fps without rerunning the model.
+      // Draw at 25 fps while limiting the expensive landmark model to 8 fps.
       const frameInterval = finished ? 40 : 50;
       if (frameTime - lastFrameAt < frameInterval) {
         calibrationFrameRef.current = requestAnimationFrame(analyze);
@@ -1270,21 +1280,22 @@ export default function Home() {
       }
       lastFrameAt = frameTime;
 
-      if (finished && lastValidCrop) {
-        const ctx = canvas.getContext("2d", { alpha: false });
-        if (ctx) {
-          ctx.save();
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.translate(canvas.width, 0);
-          ctx.scale(-1, 1);
-          ctx.drawImage(video, lastValidCrop.x, lastValidCrop.y, lastValidCrop.width, lastValidCrop.height, 0, 0, canvas.width, canvas.height);
-          ctx.restore();
+      if (finished && lastValidCrop && frameTime - lastLandmarkAt < 125) {
+        const stableContext = canvas.getContext("2d", { alpha: false });
+        if (stableContext) {
+          stableContext.save();
+          stableContext.clearRect(0, 0, canvas.width, canvas.height);
+          stableContext.translate(canvas.width, 0);
+          stableContext.scale(-1, 1);
+          stableContext.drawImage(video, lastValidCrop.x, lastValidCrop.y, lastValidCrop.width, lastValidCrop.height, 0, 0, canvas.width, canvas.height);
+          stableContext.restore();
           const previewContext = mouthPreviewRef.current?.getContext("2d", { alpha: false });
           if (previewContext && mouthPreviewRef.current) previewContext.drawImage(canvas, 0, 0, mouthPreviewRef.current.width, mouthPreviewRef.current.height);
         }
         calibrationFrameRef.current = requestAnimationFrame(analyze);
         return;
       }
+      lastLandmarkAt = frameTime;
 
       const result = landmarker.detectForVideo(video, frameTime);
       const landmarks = result.faceLandmarks[0];
@@ -1308,6 +1319,7 @@ export default function Home() {
         const adequateInput = video.videoWidth >= 720 && lipWidth >= 55 && lipHeight >= 18;
         const frontal = Math.abs(landmarks[33].z - landmarks[263].z) < 0.035;
         if (validCrop && adequateInput && frontal) {
+          trackingMisses = 0;
           lastValidCrop = { x: sourceX, y: sourceY, width: cropWidth, height: cropHeight };
           ctx.save();
           ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -1331,6 +1343,7 @@ export default function Home() {
           }
           faceStableFramesRef.current += 1;
         } else {
+          if (finished) trackingMisses += 1;
           faceStableFramesRef.current = Math.max(0, faceStableFramesRef.current - 2);
           if (lastValidCrop) {
             ctx.save();
@@ -1340,10 +1353,29 @@ export default function Home() {
             ctx.drawImage(video, lastValidCrop.x, lastValidCrop.y, lastValidCrop.width, lastValidCrop.height, 0, 0, canvas.width, canvas.height);
             ctx.restore();
           }
+          if (finished && trackingMisses >= 16) {
+            setCameraPassed(false);
+            if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+            setRecording(false);
+            if (timerRef.current) clearInterval(timerRef.current);
+            if (recordingLimitRef.current) clearTimeout(recordingLimitRef.current);
+            setToast("Recording stopped because your mouth moved out of the calibrated area. Recalibrate before continuing.");
+            calibrationRunRef.current += 1;
+          }
         }
       } else {
+        if (finished) trackingMisses += 1;
         faceStableFramesRef.current = 0;
         ctx?.clearRect(0, 0, canvas.width, canvas.height);
+        if (finished && trackingMisses >= 16) {
+          setCameraPassed(false);
+          if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+          setRecording(false);
+          if (timerRef.current) clearInterval(timerRef.current);
+          if (recordingLimitRef.current) clearTimeout(recordingLimitRef.current);
+          setToast("Recording stopped because mouth tracking was lost. Recalibrate before continuing.");
+          calibrationRunRef.current += 1;
+        }
       }
 
       if (analyser) {
@@ -1467,7 +1499,18 @@ export default function Home() {
     recorder.onstop = () => {
       const blob = new Blob(chunksRef.current, { type: recorder.mimeType || preferred });
       const duration = (Date.now() - startedRef.current) / 1000;
-      setPreview({ blob, duration, url: URL.createObjectURL(blob) });
+      if (!blob.size || duration < 0.5) {
+        setPreview(null);
+        setToast("The browser did not produce a usable video. Please record this prompt again.");
+      } else {
+        setPreview({ blob, duration, url: URL.createObjectURL(blob) });
+      }
+    };
+    recorder.onerror = () => {
+      setRecording(false);
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (recordingLimitRef.current) clearTimeout(recordingLimitRef.current);
+      setToast("Recording stopped because the browser reported a media error. Reconnect the camera and microphone, then try again.");
     };
     recorder.start(2000);
     recorderRef.current = recorder;
@@ -1475,12 +1518,22 @@ export default function Home() {
     setElapsed(0);
     setRecording(true);
     timerRef.current = setInterval(() => setElapsed((v) => v + 0.25), 250);
+    const maximumSeconds = Math.min(Math.max((current.responseSeconds || 20) + 15, 30), 180);
+    recordingLimitRef.current = setTimeout(() => {
+      if (recorder.state === "recording") {
+        recorder.stop();
+        setRecording(false);
+        if (timerRef.current) clearInterval(timerRef.current);
+        setToast(`Recording stopped at the ${maximumSeconds}-second safety limit. Review it before accepting.`);
+      }
+    }, maximumSeconds * 1000);
   }
 
   function stopRecording() {
     recorderRef.current?.stop();
     setRecording(false);
     if (timerRef.current) clearInterval(timerRef.current);
+    if (recordingLimitRef.current) clearTimeout(recordingLimitRef.current);
   }
 
   async function acceptRecording() {
@@ -2016,7 +2069,7 @@ export default function Home() {
           </div>
           <aside className="reviewer-media"><div className="reviewer-media-heading"><b>Video preview</b><small>{selectedReviewRecording ? `${selectedReviewRecording.prompt_id} | ${selectedReviewRecording.language}` : "Select Watch beside any recording"}</small></div>{reviewMedia ? <video src={reviewMedia} controls autoPlay playsInline /> : <div className="reviewer-media-empty">No video selected</div>}{selectedReviewRecording && <div className="expected-script"><span>Expected script</span><p>{selectedReviewRecording.original_transcript || selectedExpectedPrompt?.text || "No expected script was saved for this recording."}</p>{selectedExpectedPrompt?.translation && <><span>English translation</span><p>{selectedExpectedPrompt.translation}</p></>}<small>Compare the spoken audio and visible lip movement with this assigned text before choosing Approve, Decline, or Redo.</small>{selectedReviewRecording.review_comment && !recordingReviewDraft && <div className="saved-clip-comment"><b>Saved reviewer comment</b><p>{selectedReviewRecording.review_comment}</p></div>}</div>}{recordingReviewDraft && <div className="clip-comment-editor"><b>{recordingReviewDraft.decision === "rejected" ? "Why is this video declined?" : "What should the participant improve?"}</b><small>This comment is saved with this video and shown to the participant if it is returned.</small><textarea autoFocus value={recordingReviewDraft.comments} onChange={(event) => setRecordingReviewDraft({ ...recordingReviewDraft, comments: event.target.value })} placeholder="For example: The lips moved out of frame. Please keep your mouth centred and repeat the full sentence." /><div><button className="download" onClick={() => setRecordingReviewDraft(null)}>Cancel</button><button className="primary" disabled={recordingReviewDraft.comments.trim().length < 10} onClick={() => reviewRecording(recordingReviewDraft.recordingId, recordingReviewDraft.decision, recordingReviewDraft.comments)}>Save {recordingReviewDraft.decision === "rejected" ? "decline" : "redo request"}</button></div></div>}</aside>
           </div>
-          {currentRole === "reviewer" ? <div className="review-decision recommendation-panel"><div><h3>Reviewer recommendation</h3>{reviewRecommendation?.admin_review_status === "returned" && <div className="info-banner"><b>Administrator returned this review</b><p>{reviewRecommendation.admin_feedback}</p></div>}<p>{everyRecordingReviewed ? "All recordings have a decision. Request redo for problem clips or recommend approval when every clip passes." : `Review every recording first. ${reviewerRecords.filter((record) => !record.review_decision).length} still need a decision.`}</p><label className="return-comment-field"><span>Comments for the administrator or participant</span><small>Required when returning recordings. Explain what needs to be corrected.</small><textarea value={reviewComments} onChange={(event) => setReviewComments(event.target.value)} placeholder="For example: Please record the marked clips again in a quieter room." /></label></div><button className="secondary" disabled={!hasRecordingForRedo || reviewComments.trim().length < 10} title={!hasRecordingForRedo ? "Mark at least one recording for redo first" : reviewComments.trim().length < 10 ? "Add a return comment of at least 10 characters" : ""} onClick={() => reviewRecommendation?.admin_review_status === "returned" ? returnClipsToParticipant() : submitReviewRecommendation("changes_requested")}>{reviewRecommendation?.admin_review_status === "returned" ? "Return clips to participant" : "Send redo recommendation"}</button><button className="primary" disabled={!everyRecordingApproved} title={!everyRecordingApproved ? "Every recording must be approved first" : ""} onClick={() => submitReviewRecommendation("approved")}>Recommend approval</button></div> : <div className="review-decision"><div><h3>Administrator final decision</h3><p>{reviewRecommendation ? `Reviewer recommendation: ${reviewRecommendation.recommendation.replaceAll("_", " ")}. ${reviewRecommendation.comments || "No reviewer comments."}` : "A reviewer recommendation is required for approval. Full rejection is reserved for serious account-level or consent issues."}</p>{reviewRecommendation?.admin_review_status === "returned" && <p><b>Returned to reviewer:</b> {reviewRecommendation.admin_feedback}</p>}<label className="return-comment-field"><span>Administrator comments</span><small>Required when returning a review or rejecting a submission.</small><textarea value={adminDecisionComments} onChange={(event) => setAdminDecisionComments(event.target.value)} placeholder="Explain what the reviewer must correct or why the full submission is being rejected." /></label></div><button className="secondary" disabled={!reviewRecommendation || adminDecisionComments.trim().length < 10 || reviewRecommendation.admin_review_status === "returned"} title={adminDecisionComments.trim().length < 10 ? "Enter feedback of at least 10 characters" : ""} onClick={() => { if (window.confirm(`Return this recommendation to the reviewer assigned to ${selectedReviewSubmission?.participant_id}?`)) returnRecommendationToReviewer(); }}>Return review to reviewer</button><button className="secondary danger-border" disabled={adminDecisionComments.trim().length < 10} title={adminDecisionComments.trim().length < 10 ? "Enter an account-level reason of at least 10 characters" : ""} onClick={() => { if (window.confirm(`Reject the entire submission from ${selectedReviewSubmission?.participant_id}? Use this only for an account-level, consent, fraud, or eligibility issue.`)) makeReviewDecision("rejected", adminDecisionComments); }}>Reject entire submission</button><button className="primary" disabled={reviewRecommendation?.recommendation !== "approved" || reviewRecommendation.admin_review_status === "returned"} title={reviewRecommendation?.admin_review_status === "returned" ? "The reviewer must respond to the returned review first" : reviewRecommendation?.recommendation !== "approved" ? "A reviewer approval recommendation is required" : ""} onClick={() => { if (window.confirm(`Give final approval to submission ${selectedReviewId.slice(0, 8)} from ${selectedReviewSubmission?.participant_id}?`)) makeReviewDecision("approved", adminDecisionComments); }}>Final approval</button><button className="primary payment" disabled={selectedReviewSubmission?.status !== "payment_eligible"} onClick={approvePayment}>Process payment</button></div>}
+          {currentRole === "reviewer" ? <div className="review-decision recommendation-panel"><div><h3>Reviewer recommendation</h3>{reviewRecommendation?.admin_review_status === "returned" && <div className="info-banner"><b>Administrator returned this review</b><p>{reviewRecommendation.admin_feedback}</p></div>}<p>{everyRecordingReviewed ? "All recordings have a decision. Request redo for problem clips or recommend approval when every clip passes." : `Review every recording first. ${reviewerRecords.filter((record) => !record.review_decision).length} still need a decision.`}</p><label className="return-comment-field"><span>Comments for the administrator or participant</span><small>Required when returning recordings. Explain what needs to be corrected.</small><textarea value={reviewComments} onChange={(event) => setReviewComments(event.target.value)} placeholder="For example: Please record the marked clips again in a quieter room." /></label></div><button className="secondary" disabled={!hasRecordingForRedo || reviewComments.trim().length < 10} title={!hasRecordingForRedo ? "Mark at least one recording for redo first" : reviewComments.trim().length < 10 ? "Add a return comment of at least 10 characters" : ""} onClick={() => reviewRecommendation?.admin_review_status === "returned" ? returnClipsToParticipant() : submitReviewRecommendation("changes_requested")}>{reviewRecommendation?.admin_review_status === "returned" ? "Return clips to participant" : "Send redo recommendation"}</button><button className="primary" disabled={!everyRecordingApproved} title={!everyRecordingApproved ? "Every recording must be approved first" : ""} onClick={() => submitReviewRecommendation("approved")}>Recommend approval</button></div> : <div className="review-decision"><div><h3>Administrator final decision</h3><p>{reviewRecommendation ? `Reviewer recommendation: ${reviewRecommendation.recommendation.replaceAll("_", " ")}. ${reviewRecommendation.comments || "No reviewer comments."}` : "A reviewer recommendation is required for approval. Full rejection is reserved for serious account-level or consent issues."}</p>{reviewRecommendation?.admin_review_status === "returned" && <p><b>Returned to reviewer:</b> {reviewRecommendation.admin_feedback}</p>}<label className="return-comment-field"><span>Administrator comments</span><small>Required when returning a review or rejecting a submission.</small><textarea value={adminDecisionComments} onChange={(event) => setAdminDecisionComments(event.target.value)} placeholder="Explain what the reviewer must correct or why the full submission is being rejected." /></label></div><button className="secondary" disabled={!reviewRecommendation || reviewRecommendation.admin_review_status === "returned"} title={!reviewRecommendation ? "A reviewer recommendation is required" : reviewRecommendation.admin_review_status === "returned" ? "This review is already back with the reviewer" : "Written feedback is required"} onClick={() => { if (window.confirm(`Return this recommendation to the reviewer assigned to ${selectedReviewSubmission?.participant_id}?`)) returnRecommendationToReviewer(); }}>Return review to reviewer</button><button className="secondary danger-border" title="A written reason is required before rejection" onClick={() => { if (adminDecisionComments.trim().length < 10) { setToast("Add an account-level rejection reason of at least 10 characters."); return; } if (window.confirm(`Reject the entire submission from ${selectedReviewSubmission?.participant_id}? Use this only for an account-level, consent, fraud, or eligibility issue.`)) makeReviewDecision("rejected", adminDecisionComments); }}>Reject entire submission</button><button className="primary" disabled={reviewRecommendation?.recommendation !== "approved" || reviewRecommendation.admin_review_status === "returned"} title={reviewRecommendation?.admin_review_status === "returned" ? "The reviewer must respond to the returned review first" : reviewRecommendation?.recommendation !== "approved" ? "A reviewer approval recommendation is required" : ""} onClick={() => { if (window.confirm(`Give final approval to submission ${selectedReviewId.slice(0, 8)} from ${selectedReviewSubmission?.participant_id}?`)) makeReviewDecision("approved", adminDecisionComments); }}>Final approval</button><button className="primary payment" disabled={selectedReviewSubmission?.status !== "payment_eligible"} onClick={approvePayment}>Process payment</button></div>}
           </> : <div className="empty-workspace"><h3>Select a submission</h3><p>Choose an item from the queue to inspect its recordings and review history.</p></div>}
           </>}
           {currentRole === "admin" && adminWorkspaceView === "operations" && <AdminOperations />}
