@@ -11,6 +11,7 @@
     "start": "next start",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
     "lint": "eslint",
+    "archive:recordings": "node scripts/archive-recordings.mjs",
     "supabase:seed": "node --experimental-strip-types scripts/seed-supabase.mjs"
   },
   "dependencies": {

@@ -5,6 +5,20 @@ import { backendConfigured, getSupabase } from "./lib/supabase";
 
 type Row = Record<string, unknown>;
 
+function related(row: Row, key: string): Row {
+  const value = row[key];
+  return (Array.isArray(value) ? value[0] : value || {}) as Row;
+}
+
+function ParticipantPaymentRow({ row, onMarkPaid }: { row: Row; onMarkPaid: (id: string) => void }) {
+  const account = related(row, "payout_accounts");
+  const submission = related(row, "submissions");
+  return <div className="ops-row payment-queue-row">
+    <span><b>{String(submission.participant_id || "Participant")}</b><small>{String(row.amount)} {String(row.currency)} due | {String(row.status)}</small><small>{String(account.bank_name || "Verified bank")} | {String(account.account_name || "Verified account")} | ending {String(account.account_last4 || "----")}</small></span>
+    <button onClick={() => onMarkPaid(String(row.id))}>Mark paid</button>
+  </div>;
+}
+
 export function AdminOperations() {
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState("NGN");
@@ -31,7 +45,7 @@ export function AdminOperations() {
     const [withdrawalResult, riskResult, paymentResult, reviewerPaymentResult, reviewerPolicyResult, auditResult, releaseResult, staffMemberResult, submissionResult, policyResult] = await Promise.all([
       supabase.from("withdrawal_requests").select("*").in("status", ["requested", "processing"]).order("requested_at"),
       supabase.from("risk_flags").select("*").eq("status", "open").order("score", { ascending: false }),
-      supabase.from("payments").select("id,submission_id,amount,currency,status,created_at").in("status", ["eligible", "processing", "failed"]).order("created_at"),
+      supabase.from("payments").select("id,submission_id,user_id,amount,currency,status,provider_transaction_reference,created_at,payout_accounts(bank_name,account_name,account_last4),submissions(participant_id)").in("status", ["eligible", "processing", "failed"]).order("created_at"),
       supabase.from("reviewer_payments").select("id,submission_id,reviewer_id,reviewed_video_count,rate_per_video,amount,currency,status,created_at").in("status", ["eligible", "processing", "failed"]).order("created_at"),
       supabase.from("reviewer_compensation_policies").select("amount_per_video,currency,effective_at").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle(),
       supabase.from("audit_events").select("id,action,entity_type,entity_id,created_at").order("created_at", { ascending: false }).limit(25),
@@ -122,6 +136,19 @@ export function AdminOperations() {
     if (!error) refresh();
   }
 
+  async function markParticipantPaymentPaid(id: string) {
+    const reference = window.prompt("Enter the bank transfer or payment reference. This will mark the participant as paid.");
+    if (reference === null) return;
+    if (reference.trim().length < 3) {
+      setMessage("Enter a valid payment reference before marking this payment paid.");
+      return;
+    }
+    if (!window.confirm("Confirm that the money has already been sent to the verified participant account?")) return;
+    const { error } = await getSupabase()!.rpc("mark_participant_payment_paid", { p_payment_id: id, p_reference: reference.trim() });
+    setMessage(error ? error.message : "Participant payment marked paid and the participant was notified.");
+    if (!error) refresh();
+  }
+
   async function completeWithdrawal(id: string, submissionId: string) {
     const supabase = getSupabase();
     const now = new Date().toISOString();
@@ -201,7 +228,7 @@ export function AdminOperations() {
     <div className="ops-grid">
       <div className="ops-card"><h3>Withdrawal requests</h3>{withdrawals.length ? withdrawals.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.submission_id || "Account request")}</span><button onClick={() => completeWithdrawal(String(row.id), String(row.submission_id || ""))}>Complete</button></div>) : <p>No open requests.</p>}</div>
       <div className="ops-card"><h3>Risk flags</h3>{risks.length ? risks.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.flag_type)} · {String(row.score)}</span><button onClick={() => resolveRisk(String(row.id), "dismissed")}>Dismiss</button><button onClick={() => resolveRisk(String(row.id), "confirmed")}>Confirm</button></div>) : <p>No open flags.</p>}</div>
-      <div className="ops-card"><h3>Participant payment queue</h3>{payments.length ? payments.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.amount)} {String(row.currency)} · {String(row.status)}</span></div>) : <p>No participant payments require action.</p>}</div>
+      <div className="ops-card"><h3>Participant payment queue</h3><p className="ops-hint">The full account number is not stored in NaijaVision. Confirm the verified bank, account name, ending digits, and amount before recording an external transfer as paid.</p>{payments.length ? payments.map((row) => <ParticipantPaymentRow key={String(row.id)} row={row} onMarkPaid={markParticipantPaymentPaid} />) : <p>No participant payments require action.</p>}</div>
       <div className="ops-card"><h3>Reviewer payment queue</h3>{reviewerPayments.length ? reviewerPayments.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.reviewed_video_count)} videos × {String(row.rate_per_video)} {String(row.currency)} = {String(row.amount)} {String(row.currency)} · {String(row.status)}</span>{row.status !== "processing" && <button onClick={() => processReviewerPayment(String(row.id))}>{row.status === "failed" ? "Retry payment" : "Process payment"}</button>}</div>) : <p>No reviewer payments require action.</p>}</div>
       <div className="ops-card"><h3>Recent audit events</h3>{audit.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.action)} · {String(row.entity_type)}</span><small>{new Date(String(row.created_at)).toLocaleString()}</small></div>)}</div>
       <div className="ops-card"><h3>Release pipeline</h3><p className="ops-hint">This controls publication of a complete dataset release. It is separate from approving or rejecting individual participant recordings.</p>{releases.length ? releases.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.name)} {String(row.version)} | {String(row.status)}{row.rejection_reason ? ` | ${String(row.rejection_reason)}` : ""}</span>{row.status === "draft" && <button onClick={() => advanceRelease(String(row.id), "privacy_review")}>Send to privacy review</button>}{row.status === "privacy_review" && <><button onClick={() => returnReleaseToDraft(String(row.id))}>Return to draft</button><button className="danger" onClick={() => rejectRelease(String(row.id))}>Reject</button><button onClick={() => advanceRelease(String(row.id), "approved")}>Approve</button></>}{row.status === "rejected" && <button onClick={() => returnReleaseToDraft(String(row.id))}>Return to draft</button>}{row.status === "approved" && <button onClick={() => advanceRelease(String(row.id), "published")}>Publish</button>}</div>) : <p>No release drafts.</p>}</div>
