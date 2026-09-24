@@ -34,7 +34,7 @@ test("account cleanup is dry-run by default and always preserves administrators"
   assert.match(script, /Refusing to execute because one or more requested keep IDs were not found/);
 });
 
-test("public authentication is CAPTCHA gated and privileged edge calls require active accounts", async () => {
+test("public authentication remains usable and privileged edge calls require active accounts", async () => {
   const [signup, signin, forgot, security, payout] = await Promise.all([
     read("src/app/signup/page.tsx"),
     read("src/app/signin/page.tsx"),
@@ -42,9 +42,10 @@ test("public authentication is CAPTCHA gated and privileged edge calls require a
     read("supabase/functions/_shared/security.ts"),
     read("supabase/functions/tokenize-payout-account/index.ts"),
   ]);
-  assert.match(signup, /options: \{ captchaToken, data:/);
-  assert.match(signin, /options: \{ captchaToken \}/);
-  assert.match(forgot, /captchaToken/);
+  assert.doesNotMatch(signup, /captchaToken|HCaptcha/);
+  assert.doesNotMatch(signin, /captchaToken|HCaptcha/);
+  assert.doesNotMatch(forgot, /captchaToken|HCaptcha/);
+  assert.match(signup, /administrator must approve the account/i);
   assert.match(security, /eq\("role", "admin"\)\.eq\("account_status", "active"\)/);
   assert.match(payout, /requireActiveAccount\(user\.id\)/);
 });

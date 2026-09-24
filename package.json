@@ -16,7 +16,6 @@
     "supabase:seed": "node --experimental-strip-types scripts/seed-supabase.mjs"
   },
   "dependencies": {
-    "@hcaptcha/react-hcaptcha": "^2.2.0",
     "@mediapipe/tasks-vision": "^1.0.0",
     "@supabase/supabase-js": "^2.111.0",
     "next": "16.3.4",

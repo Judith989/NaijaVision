@@ -65,7 +65,7 @@ study partners before field deployment.
 1. Create a Supabase project and install the Supabase CLI.
    Configure the email and SMS templates to deliver a one-time code compatible
    with `verifyOtp`.
-2. Create an hCaptcha site for the production domain. In Supabase, open **Authentication → Bot and Abuse Protection**, enable CAPTCHA, select hCaptcha, and save the hCaptcha secret. Copy `.env.example` to `.env.local` and add the project URL, publishable key, and public hCaptcha site key. Also add `NEXT_PUBLIC_HCAPTCHA_SITE_KEY` as a GitHub Actions repository variable. Signup, sign-in, and password reset remain closed when this public key is missing.
+2. Keep Supabase CAPTCHA protection disabled. Public signup is protected by email verification, database-enforced pending status, and mandatory administrator approval before platform access.
 3. Link the project and apply the migrations:
 
 ```powershell

@@ -1,22 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import HCaptcha from "@hcaptcha/react-hcaptcha";
 import { backendConfigured, getSupabase } from "../lib/supabase";
 import { Mark } from "../lib/ui";
 
 export default function SignInPage() {
-  const captchaSiteKey = process.env.NEXT_PUBLIC_HCAPTCHA_SITE_KEY || "";
-  const captchaRef = useRef<HCaptcha>(null);
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState("");
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -33,18 +29,11 @@ export default function SignInPage() {
       setMessage("Supabase is not configured yet. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY to enable sign-in.");
       return;
     }
-    if (captchaSiteKey && !captchaToken) {
-      setMessage("Complete the anti-bot check before signing in.");
-      return;
-    }
     setLoading(true);
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
-      ...(captchaSiteKey ? { options: { captchaToken } } : {}),
     });
-    captchaRef.current?.resetCaptcha();
-    setCaptchaToken("");
     if (error) {
       setLoading(false);
       setMessage(error.message);
@@ -84,8 +73,6 @@ export default function SignInPage() {
           </div>
         </div>
 
-        {captchaSiteKey && <HCaptcha ref={captchaRef} sitekey={captchaSiteKey} onVerify={setCaptchaToken} onExpire={() => setCaptchaToken("")} onError={() => { setCaptchaToken(""); setMessage("The anti-bot check could not load. Refresh the page and try again."); }} />}
-
         {!backendConfigured && (
           <div className="notice">
             <Mark>i</Mark>
@@ -108,7 +95,7 @@ export default function SignInPage() {
 
         <div className="footer-actions">
           <Link className="secondary" href="/forgot-password">Forgot password?</Link>
-          <button className="primary" disabled={loading || (Boolean(captchaSiteKey) && !captchaToken) || !email.trim() || !password} onClick={handleSignIn}>
+          <button className="primary" disabled={loading || !email.trim() || !password} onClick={handleSignIn}>
             {loading ? "Signing in…" : "Sign in"}
           </button>
         </div>
