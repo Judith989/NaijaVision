@@ -65,7 +65,7 @@ study partners before field deployment.
 1. Create a Supabase project and install the Supabase CLI.
    Configure the email and SMS templates to deliver a one-time code compatible
    with `verifyOtp`.
-2. Copy `.env.example` to `.env.local` and add the project URL and publishable key.
+2. Create an hCaptcha site for the production domain. In Supabase, open **Authentication → Bot and Abuse Protection**, enable CAPTCHA, select hCaptcha, and save the hCaptcha secret. Copy `.env.example` to `.env.local` and add the project URL, publishable key, and public hCaptcha site key. Also add `NEXT_PUBLIC_HCAPTCHA_SITE_KEY` as a GitHub Actions repository variable. Signup, sign-in, and password reset remain closed when this public key is missing.
 3. Link the project and apply the migrations:
 
 ```powershell
@@ -140,6 +140,57 @@ server environments. It must never be placed in a `NEXT_PUBLIC_` variable.
   probe, synchronization, speech, framing, privacy, and duplicate results back
   to `recording_quality`.
 - Only curated `release_items` may enter a public dataset release.
+
+## Archive approved recordings
+
+The archive command downloads recordings into participant, submission, and language folders. Each filename begins with the assigned prompt ID. NaijaSafeSpeech recordings are kept in their own folder. A `manifest.json` file records the original object path, checksum, transcript, and verified local path.
+
+Set elevated Supabase credentials only in the current terminal. Never commit the secret key:
+
+```powershell
+$env:SUPABASE_URL="https://YOUR_PROJECT.supabase.co"
+$env:SUPABASE_SERVICE_ROLE_KEY="YOUR_SB_SECRET_KEY"
+```
+
+Download every administrator-approved submission without deleting cloud media:
+
+```powershell
+npm run archive:recordings -- --all-approved --output "C:\NaijaVision-Archive"
+```
+
+After verifying the archive and making a second backup, download, checksum, and remove the approved Storage objects:
+
+```powershell
+npm run archive:recordings -- --all-approved --output "C:\NaijaVision-Archive-Delete-Run" --delete-after-verify
+```
+
+Archive one approved submission by UUID:
+
+```powershell
+npm run archive:recordings -- --submission "SUBMISSION_UUID" --output "C:\NaijaVision-Archive-One" --delete-after-verify
+```
+
+Deletion is refused unless the submission has an administrator `approved_at` timestamp and its status is `payment_eligible`, `payment_processing`, or `paid`. Database recording rows remain available for audit and display `Archived locally` after the Storage object is removed.
+
+## Approving and cleaning up accounts
+
+New accounts remain pending after email confirmation. An administrator approves or declines them in **Admin workspace → Administration → Pending account requests**. Pending, suspended, closed, and missing profiles cannot enter the dashboard or contribution workflow.
+
+The account cleanup tool preserves the five selected participant IDs configured in the script and every administrator account. Its default mode is read-only:
+
+```powershell
+$env:SUPABASE_URL="https://YOUR_PROJECT.supabase.co"
+$env:SUPABASE_SERVICE_ROLE_KEY="YOUR_SB_SECRET_KEY"
+npm run accounts:cleanup
+```
+
+Read the complete preserve/delete plan. Only after confirming every row, execute it with:
+
+```powershell
+npm run accounts:cleanup -- --execute --confirm-delete-unlisted-accounts
+```
+
+Execution removes each deleted user's remaining `raw-recordings` objects before deleting the Auth user. The profile and dependent database rows are then removed by foreign-key cascades. The tool refuses to execute if any requested keep ID is missing and never deletes an administrator.
 
 ## Required external services
 

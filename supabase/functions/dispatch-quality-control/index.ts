@@ -1,17 +1,19 @@
-import { corsHeaders, authenticate, json, serviceClient } from "../_shared/security.ts";
+import { corsHeaders, authenticate, json, requireAdmin, requireActiveAccount, serviceClient } from "../_shared/security.ts";
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const { user } = await authenticate(request);
+    await requireActiveAccount(user.id);
     const { submissionId } = await request.json();
     const workerUrl = Deno.env.get("QC_WORKER_URL");
     const workerSecret = Deno.env.get("QC_WORKER_SECRET");
     if (!workerUrl || !workerSecret) return json({ error: "Quality-control worker is not configured." }, 503);
     const service = serviceClient();
     const { data: submission } = await service.from("submissions").select("user_id,status").eq("id", submissionId).single();
-    const { data: adminRole } = await service.from("user_roles").select("role").eq("user_id", user.id).eq("role", "admin").maybeSingle();
-    if (!submission || (submission.user_id !== user.id && !adminRole)) return json({ error: "Not authorized." }, 403);
+    let isAdmin = false;
+    try { await requireAdmin(user.id); isAdmin = true; } catch { /* The submission owner does not need admin access. */ }
+    if (!submission || (submission.user_id !== user.id && !isAdmin)) return json({ error: "Not authorized." }, 403);
     if (!["automated_qc", "awaiting_review"].includes(submission.status)) return json({ error: "Submission is not ready for quality control." }, 409);
     const { data: recordings, error } = await service.from("recordings")
       .select("id,object_path,prompt_assignment_id,language,original_transcript")

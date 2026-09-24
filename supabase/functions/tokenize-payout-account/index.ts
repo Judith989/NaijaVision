@@ -1,9 +1,10 @@
-import { corsHeaders, authenticate, json, serviceClient } from "../_shared/security.ts";
+import { corsHeaders, authenticate, json, requireActiveAccount, serviceClient } from "../_shared/security.ts";
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const { user } = await authenticate(request);
+    await requireActiveAccount(user.id);
     const input = await request.json();
     const accountNumber = String(input.accountNumber || "").replace(/\D/g, "");
     const bankCode = String(input.bankCode || "").trim();

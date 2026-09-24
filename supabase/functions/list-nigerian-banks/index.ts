@@ -1,9 +1,10 @@
-import { corsHeaders, authenticate, json } from "../_shared/security.ts";
+import { corsHeaders, authenticate, json, requireActiveAccount } from "../_shared/security.ts";
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    await authenticate(request);
+    const { user } = await authenticate(request);
+    await requireActiveAccount(user.id);
     const apiKey = Deno.env.get("PAYMENTS_PROVIDER_API_KEY");
     if (!apiKey) return json({ error: "Bank verification provider is not configured." }, 503);
     const response = await fetch("https://api.paystack.co/bank?country=nigeria&currency=NGN&perPage=100", {

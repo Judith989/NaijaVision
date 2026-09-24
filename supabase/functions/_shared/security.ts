@@ -35,7 +35,13 @@ export function serviceClient() {
 
 export async function requireAdmin(userId: string) {
   const service = serviceClient();
-  const { data } = await service.from("user_roles").select("role").eq("user_id", userId).eq("role", "admin").maybeSingle();
+  const { data } = await service.from("profiles").select("role,account_status").eq("user_id", userId).eq("role", "admin").eq("account_status", "active").maybeSingle();
   if (!data) throw new Error("Admin role required");
+}
+
+export async function requireActiveAccount(userId: string) {
+  const service = serviceClient();
+  const { data } = await service.from("profiles").select("user_id").eq("user_id", userId).eq("account_status", "active").maybeSingle();
+  if (!data) throw new Error("Active approved account required");
 }
 

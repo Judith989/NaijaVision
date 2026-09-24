@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 async function render() {
-  const outputPath = fileURLToPath(new URL("../out/index.html", import.meta.url));
+  const outputPath = fileURLToPath(new URL("../.next/server/app/index.html", import.meta.url));
   return readFile(outputPath, "utf8");
 }
 

@@ -1,16 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
+import HCaptcha from "@hcaptcha/react-hcaptcha";
 import { backendConfigured, getSupabase } from "../lib/supabase";
 import { BASE_PATH } from "../lib/basePath";
 import { Mark } from "../lib/ui";
 
 export default function ForgotPasswordPage() {
+  const captchaSiteKey = process.env.NEXT_PUBLIC_HCAPTCHA_SITE_KEY || "";
+  const captchaRef = useRef<HCaptcha>(null);
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState("");
 
   async function handleRequestReset() {
     setMessage("");
@@ -19,10 +23,17 @@ export default function ForgotPasswordPage() {
       setMessage("Supabase is not configured yet. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY to enable password resets.");
       return;
     }
+    if (captchaSiteKey && !captchaToken) {
+      setMessage("Complete the anti-bot check before requesting a reset link.");
+      return;
+    }
     setLoading(true);
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}${BASE_PATH}/reset-password`,
+      ...(captchaSiteKey ? { captchaToken } : {}),
     });
+    captchaRef.current?.resetCaptcha();
+    setCaptchaToken("");
     setLoading(false);
     if (error) {
       setMessage(error.message);
@@ -71,11 +82,13 @@ export default function ForgotPasswordPage() {
               </label>
             </div>
 
+            {captchaSiteKey && <HCaptcha ref={captchaRef} sitekey={captchaSiteKey} onVerify={setCaptchaToken} onExpire={() => setCaptchaToken("")} onError={() => { setCaptchaToken(""); setMessage("The anti-bot check could not load. Refresh the page and try again."); }} />}
+
             {message && <p className="auth-message">{message}</p>}
 
             <div className="footer-actions">
               <Link className="secondary" href="/signin">Back to sign in</Link>
-              <button className="primary" disabled={loading || !email.trim()} onClick={handleRequestReset}>
+              <button className="primary" disabled={loading || (Boolean(captchaSiteKey) && !captchaToken) || !email.trim()} onClick={handleRequestReset}>
                 {loading ? "Sending…" : "Send reset link"}
               </button>
             </div>

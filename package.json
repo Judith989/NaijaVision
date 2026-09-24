@@ -9,12 +9,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs",
     "lint": "eslint",
     "archive:recordings": "node scripts/archive-recordings.mjs",
+    "accounts:cleanup": "node scripts/cleanup-accounts.mjs",
     "supabase:seed": "node --experimental-strip-types scripts/seed-supabase.mjs"
   },
   "dependencies": {
+    "@hcaptcha/react-hcaptcha": "^2.2.0",
     "@mediapipe/tasks-vision": "^1.0.0",
     "@supabase/supabase-js": "^2.111.0",
     "next": "16.3.4",

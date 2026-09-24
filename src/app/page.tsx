@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 import { corePrompts, safeSpeechPrompts } from "./prompts";
 import { backendConfigured, getCurrentRole, getSupabase } from "./lib/supabase";
@@ -26,6 +27,9 @@ type Clip = {
 type RecordingJoinRow = {
   id: string;
   object_path: string;
+  archived_at?: string | null;
+  archive_path?: string | null;
+  storage_deleted_at?: string | null;
   duration_seconds: number;
   language: string;
   original_transcript?: string;
@@ -58,7 +62,7 @@ const fallbackNigerianBanks = [
   { name: "Unity Bank", code: "215" }, { name: "Wema Bank", code: "035" },
   { name: "Zenith Bank", code: "057" },
 ];
-const PER_LANGUAGE_COMPENSATION = { amount: 500, currency: "NGN" };
+const PER_LANGUAGE_COMPENSATION = { amount: 750, currency: "NGN" };
 const MIN_LIGHT_LEVEL = 25;
 const MAX_LIGHT_LEVEL = 240;
 
@@ -146,6 +150,7 @@ function MultiSelect({ options, value, onChange }: { options: string[]; value: s
 }
 
 export default function Home() {
+  const router = useRouter();
   const [step, setStep] = useState<Step>("welcome");
   const [calibrationReturnStep, setCalibrationReturnStep] = useState<"profile" | "record">("profile");
   const [account, setAccount] = useState({ contactMethod: "Email", contact: "", payoutCountry: "Nigeria", bankName: "", bankCode: "", accountName: "", accountNumber: "" });
@@ -211,9 +216,9 @@ export default function Home() {
   const [reviewComments, setReviewComments] = useState("");
   const [adminDecisionComments, setAdminDecisionComments] = useState("");
   const [adminWorkspaceView, setAdminWorkspaceView] = useState<"reviews" | "operations">("reviews");
-  const [reviewerRecords, setReviewerRecords] = useState<Array<{ id: string; prompt_id: string; original_transcript: string; language: string; duration_seconds: number; quality_status: string; object_path: string; signed_url: string; review_decision?: "approved" | "rejected" | "changes_requested"; review_comment?: string }>>([]);
+  const [reviewerRecords, setReviewerRecords] = useState<Array<{ id: string; prompt_id: string; original_transcript: string; language: string; duration_seconds: number; quality_status: string; object_path: string; signed_url: string; archived_at?: string | null; archive_path?: string | null; storage_deleted_at?: string | null; review_decision?: "approved" | "rejected" | "changes_requested"; review_comment?: string }>>([]);
   const [reviewerPayments, setReviewerPayments] = useState<ReviewerPaymentRow[]>([]);
-  const [reviewerRate, setReviewerRate] = useState({ amount: 10, currency: "NGN" });
+  const [reviewerRate, setReviewerRate] = useState({ amount: 20, currency: "NGN" });
   const [reviewerPayout, setReviewerPayout] = useState<{ bank_name: string; account_last4: string; verified_at: string | null } | null>(null);
   const [localRecordingReviews, setLocalRecordingReviews] = useState<Record<string, "approved" | "rejected" | "changes_requested">>({});
   const [withdrawalReason, setWithdrawalReason] = useState("");
@@ -264,6 +269,11 @@ export default function Home() {
       setPaymentEditMode(editingPayment);
       if (!data.user) {
         if (requestedMode.get("contribute") === "1" || requestedMode.get("reviewer") === "1" || requestedMode.get("admin") === "1") window.location.replace(`${BASE_PATH}/signin?next=/dashboard`);
+        return;
+      }
+      const { data: accountProfile } = await supabase.from("profiles").select("account_status").eq("user_id", data.user.id).maybeSingle();
+      if (accountProfile?.account_status !== "active") {
+        window.location.replace(`${BASE_PATH}/account-pending`);
         return;
       }
       setAuthenticatedUserId(data.user.id);
@@ -425,7 +435,7 @@ export default function Home() {
     const supabase = getSupabase();
     if (!supabase) return;
     supabase.from("recordings")
-      .select("id,language,duration_seconds,quality_status,object_path,original_transcript,prompt_assignments(prompt_id)")
+      .select("id,language,duration_seconds,quality_status,object_path,original_transcript,archived_at,archive_path,storage_deleted_at,prompt_assignments(prompt_id)")
       .eq("submission_id", selectedReviewId)
       .then(async ({ data }) => {
         const rows = data || [];
@@ -443,7 +453,9 @@ export default function Home() {
           }
         }
         const signed = await Promise.all((rows as unknown as RecordingJoinRow[]).map(async (row) => {
-          const { data: url } = await supabase.storage.from("raw-recordings").createSignedUrl(row.object_path, 900);
+          const { data: url } = row.storage_deleted_at
+            ? { data: null }
+            : await supabase.storage.from("raw-recordings").createSignedUrl(row.object_path, 900);
           return {
             id: row.id,
             prompt_id: joinedPromptId(row),
@@ -453,6 +465,9 @@ export default function Home() {
             quality_status: row.quality_status,
             object_path: row.object_path,
             signed_url: url?.signedUrl || "",
+            archived_at: row.archived_at,
+            archive_path: row.archive_path,
+            storage_deleted_at: row.storage_deleted_at,
             review_decision: decisionByRecording.get(row.id),
             review_comment: commentByRecording.get(row.id),
           };
@@ -895,7 +910,7 @@ export default function Home() {
       return;
     }
     if (paymentEditMode) {
-      window.location.assign(`${BASE_PATH}/dashboard`);
+      router.push(`${BASE_PATH}/dashboard`);
       return;
     }
     setStep("study");
@@ -1786,7 +1801,7 @@ export default function Home() {
           </div>
           <div className="notice"><Mark>i</Mark><p>Compensation becomes payable after a reviewer approves the completed submission. Make sure the account details are correct.</p></div>
           {authMessage && <p className="auth-message">{authMessage}</p>}
-          <div className="footer-actions"><button className="secondary" onClick={() => paymentEditMode ? window.location.assign(`${BASE_PATH}/dashboard`) : setStep("welcome")}>{paymentEditMode ? "Cancel" : "Back"}</button>{authVerified ? <button className="primary" disabled={!bankVerified} onClick={savePayoutAndContinue}>{paymentEditMode ? "Save verified payment details" : "Continue with verified account"} <span>→</span></button> : <button className="primary" disabled={!account.contact.trim()} onClick={requestAccountVerification}>Verify contact <span>→</span></button>}</div>
+          <div className="footer-actions"><button className="secondary" onClick={() => paymentEditMode ? router.push(`${BASE_PATH}/dashboard`) : setStep("welcome")}>{paymentEditMode ? "Cancel" : "Back"}</button>{authVerified ? <button className="primary" disabled={!bankVerified} onClick={savePayoutAndContinue}>{paymentEditMode ? "Save verified payment details" : "Continue with verified account"} <span>→</span></button> : <button className="primary" disabled={!account.contact.trim()} onClick={requestAccountVerification}>Verify contact <span>→</span></button>}</div>
         </section>
       )}
 
@@ -1800,7 +1815,7 @@ export default function Home() {
             <h3>What we collect</h3><p>Audio, mouth-region video, transcripts, language and demographic responses, device and environment metadata, calibration results, recording quality information, consent status, and a non-identifying participant ID.</p>
             <h3>Privacy limitation</h3><blockquote>The collection method reduces identity exposure by excluding most of the face, while acknowledging that audio and mouth-region video remain potentially identifiable biometric data.</blockquote>
             <h3>Public release and research use</h3><p>Accepted research recordings and approved participant metadata are intended for public dataset release and AI research.</p>
-            <h3>Review and compensation</h3><p>Submission does not guarantee approval. A trained reviewer checks prompt accuracy, audio and video quality, privacy, duplication, and policy compliance. The rate is 500 NGN for each language whose required recordings are completed, payable only after approval.</p>
+            <h3>Review and compensation</h3><p>Submission does not guarantee approval. A trained reviewer checks prompt accuracy, audio and video quality, privacy, duplication, and policy compliance. The rate is 750 NGN for each language whose required recordings are completed, payable only after approval.</p>
             <div className="compensation-callout">
               <div><small>Rate per completed language</small><b>{compensationRate.amount} {compensationRate.currency}</b></div>
               <div><small>Potential total for selected language sets</small><b>{potentialCompensation.amount} {potentialCompensation.currency}</b></div>
@@ -2055,7 +2070,7 @@ export default function Home() {
           {currentRole === "reviewer" && <section className="reviewer-overview">
             <div className="metric-grid reviewer-metrics"><div><span>Rate per video</span><b>₦{reviewerRate.amount.toLocaleString()}</b><small>Each unique video reviewed</small></div><div><span>Videos reviewed</span><b>{reviewerVideoCount}</b><small>Across {reviewerPayments.length} participant submissions</small></div><div><span>Total earned</span><b>₦{reviewerTotalEarned.toLocaleString()}</b><small>Paid and pending reviewer fees</small></div><div><span>Awaiting payment</span><b>₦{reviewerPending.toLocaleString()}</b><small>₦{reviewerPaid.toLocaleString()} paid to date</small></div></div>
             <div className="reviewer-account-strip"><div><small>Assigned work</small><b>{reviewQueue.length} submissions currently in your review queue</b></div><div><small>Payment destination</small><b>{reviewerPayout ? `${reviewerPayout.bank_name} ending ${reviewerPayout.account_last4}` : "No verified payment account"}</b></div><a className="secondary" href={`${BASE_PATH}/?contribute=1&payment=edit`}>{reviewerPayout ? "Update payment details" : "Add payment details"}</a></div>
-            <p className="reviewer-rate-example">Example: 50 videos × ₦10 = ₦500. Reviewer earnings are separate from participant compensation.</p>
+            <p className="reviewer-rate-example">Example: 50 videos × ₦20 = ₦1,000. Reviewer earnings are separate from participant compensation.</p>
           </section>}
           {currentRole === "admin" && <section className="admin-approval-overview"><div className="metric-grid"><div><span>Awaiting final decision</span><b>{adminRecommendedQueue.length}</b><small>Reviewer recommendations ready</small></div><div><span>Payment approval</span><b>{adminPaymentQueue.length}</b><small>Approved submissions awaiting payment action</small></div><div><span>With reviewers</span><b>{adminReviewerWorkQueue.length}</b><small>Assigned reviews still in progress</small></div><div><span>Total active</span><b>{reviewQueue.length}</b><small>Across the review pipeline</small></div></div><div className="admin-approval-queue"><div className="table-head"><div><h3>Reviewer submissions for administrator action</h3><p>Open a completed recommendation to replay every recording, inspect clip decisions, approve, deny, return it to the reviewer, or process payment.</p></div></div>{adminRecommendedQueue.length || adminPaymentQueue.length ? <div className="admin-queue-list">{[...adminRecommendedQueue, ...adminPaymentQueue].map((item) => <button key={item.id} className={item.id === selectedReviewId ? "selected" : ""} onClick={() => selectReviewerSubmission(item.id)}><div><b>{item.participant_id}</b><small>Submission {item.id.slice(0, 8)} | {item.expected_recordings} recordings</small></div><span className={`status ${item.status === "payment_eligible" ? "accepted" : "needs-review"}`}>{item.status === "payment_eligible" ? "Payment approval" : `Reviewer recommends ${item.recommendation?.replaceAll("_", " ")}`}</span><strong>Open and watch all</strong></button>)}</div> : <div className="empty admin-queue-empty"><h3>No reviewer submissions need administrator action</h3><p>Completed reviewer recommendations and payment approvals will appear here automatically.</p></div>}</div></section>}
           {backendConfigured && <div className="submission-selector"><label><span>{currentRole === "admin" ? "Select a participant submission" : "Select an assigned submission"}</span><select value={selectedReviewId} onChange={(event) => event.target.value ? selectReviewerSubmission(event.target.value) : setSelectedReviewId("")}><option value="">Choose a submission</option>{reviewQueue.map((item) => <option key={item.id} value={item.id}>{item.participant_id} | {item.status.replaceAll("_", " ")} | {item.expected_recordings} recordings | {new Date(item.created_at).toLocaleDateString()}</option>)}</select></label>{reviewQueue.length === 0 && <p>{currentRole === "admin" ? "No submissions are awaiting action." : "No submissions are assigned to you yet. An administrator must assign one first."}</p>}</div>}
@@ -2065,7 +2080,7 @@ export default function Home() {
           <div className="review-media-layout">
           <div className="data-card">
             <div className="table-head"><div><h3>Submission media</h3><p>Check prompt accuracy, mouth-only framing, audio quality, duplicates, and private information.</p></div></div>
-            <div className="table-wrap"><table><thead><tr><th>Prompt</th><th>Language</th><th>Type</th><th>Duration</th><th>Quality</th><th>Media</th><th>Decision</th></tr></thead><tbody>{backendConfigured ? reviewerRecords.map((record) => <tr key={record.id} className={record.id === selectedReviewRecordingId ? "active-recording-row" : ""}><td><b>{record.prompt_id}</b></td><td>{record.language}</td><td>{[...corePrompts, ...safeSpeechPrompts].find((prompt) => prompt.id === record.prompt_id)?.type}</td><td>{Number(record.duration_seconds).toFixed(1)}s</td><td><span className={`status ${record.review_decision || "needs-review"}`}>{record.review_decision?.replaceAll("_", " ") || record.quality_status}</span></td><td><button className="download" disabled={!record.signed_url} onClick={() => { setSelectedReviewRecordingId(record.id); setReviewMedia(record.signed_url); }}>Watch</button></td><td><div className="recording-decisions"><button className={`download ${record.review_decision === "approved" ? "selected" : ""}`} onClick={() => reviewRecording(record.id, "approved")}>Approve</button><button className={`download danger ${record.review_decision === "rejected" ? "selected" : ""}`} onClick={() => reviewRecording(record.id, "rejected")}>Decline</button><button className={`download redo ${record.review_decision === "changes_requested" ? "selected" : ""}`} onClick={() => reviewRecording(record.id, "changes_requested")}>Redo</button></div></td></tr>) : clips.map((clip) => { const decision = localRecordingReviews[clip.id]; return <tr key={clip.id} className={clip.id === selectedReviewRecordingId ? "active-recording-row" : ""}><td><b>{clip.promptId}</b><small>{clip.transcript}</small></td><td>{clip.language}</td><td>{prompts.find((prompt) => prompt.id === clip.promptId)?.type}</td><td>{clip.duration.toFixed(1)}s</td><td><span className={`status ${decision || clip.status}`}>{decision === "approved" ? "approved" : decision === "rejected" ? "declined" : decision === "changes_requested" ? "redo requested" : clip.status}</span></td><td><button className="download" onClick={() => { if (reviewMedia) URL.revokeObjectURL(reviewMedia); setSelectedReviewRecordingId(clip.id); setReviewMedia(URL.createObjectURL(clip.blob)); }}>Watch</button></td><td><div className="recording-decisions"><button className="download" onClick={() => reviewRecording(clip.id, "approved")}>Approve</button><button className="download danger" onClick={() => reviewRecording(clip.id, "rejected")}>Decline</button><button className="download redo" onClick={() => reviewRecording(clip.id, "changes_requested")}>Redo</button></div></td></tr>; })}</tbody></table></div>
+            <div className="table-wrap"><table><thead><tr><th>Prompt</th><th>Language</th><th>Type</th><th>Duration</th><th>Quality</th><th>Media</th><th>Decision</th></tr></thead><tbody>{backendConfigured ? reviewerRecords.map((record) => <tr key={record.id} className={record.id === selectedReviewRecordingId ? "active-recording-row" : ""}><td><b>{record.prompt_id}</b>{record.storage_deleted_at && <small>Archived locally</small>}</td><td>{record.language}</td><td>{[...corePrompts, ...safeSpeechPrompts].find((prompt) => prompt.id === record.prompt_id)?.type}</td><td>{Number(record.duration_seconds).toFixed(1)}s</td><td><span className={`status ${record.storage_deleted_at ? "accepted" : record.review_decision || "needs-review"}`}>{record.storage_deleted_at ? "archived" : record.review_decision?.replaceAll("_", " ") || record.quality_status}</span></td><td>{record.storage_deleted_at ? <span className="status accepted" title={record.archive_path || "Stored in the verified local archive"}>Archived locally</span> : <button className="download" disabled={!record.signed_url} onClick={() => { setSelectedReviewRecordingId(record.id); setReviewMedia(record.signed_url); }}>Watch</button>}</td><td><div className="recording-decisions"><button className={`download ${record.review_decision === "approved" ? "selected" : ""}`} disabled={Boolean(record.storage_deleted_at)} onClick={() => reviewRecording(record.id, "approved")}>Approve</button><button className={`download danger ${record.review_decision === "rejected" ? "selected" : ""}`} disabled={Boolean(record.storage_deleted_at)} onClick={() => reviewRecording(record.id, "rejected")}>Decline</button><button className={`download redo ${record.review_decision === "changes_requested" ? "selected" : ""}`} disabled={Boolean(record.storage_deleted_at)} onClick={() => reviewRecording(record.id, "changes_requested")}>Redo</button></div></td></tr>) : clips.map((clip) => { const decision = localRecordingReviews[clip.id]; return <tr key={clip.id} className={clip.id === selectedReviewRecordingId ? "active-recording-row" : ""}><td><b>{clip.promptId}</b><small>{clip.transcript}</small></td><td>{clip.language}</td><td>{prompts.find((prompt) => prompt.id === clip.promptId)?.type}</td><td>{clip.duration.toFixed(1)}s</td><td><span className={`status ${decision || clip.status}`}>{decision === "approved" ? "approved" : decision === "rejected" ? "declined" : decision === "changes_requested" ? "redo requested" : clip.status}</span></td><td><button className="download" onClick={() => { if (reviewMedia) URL.revokeObjectURL(reviewMedia); setSelectedReviewRecordingId(clip.id); setReviewMedia(URL.createObjectURL(clip.blob)); }}>Watch</button></td><td><div className="recording-decisions"><button className="download" onClick={() => reviewRecording(clip.id, "approved")}>Approve</button><button className="download danger" onClick={() => reviewRecording(clip.id, "rejected")}>Decline</button><button className="download redo" onClick={() => reviewRecording(clip.id, "changes_requested")}>Redo</button></div></td></tr>; })}</tbody></table></div>
           </div>
           <aside className="reviewer-media"><div className="reviewer-media-heading"><b>Video preview</b><small>{selectedReviewRecording ? `${selectedReviewRecording.prompt_id} | ${selectedReviewRecording.language}` : "Select Watch beside any recording"}</small></div>{reviewMedia ? <video src={reviewMedia} controls autoPlay playsInline /> : <div className="reviewer-media-empty">No video selected</div>}{selectedReviewRecording && <div className="expected-script"><span>Expected script</span><p>{selectedReviewRecording.original_transcript || selectedExpectedPrompt?.text || "No expected script was saved for this recording."}</p>{selectedExpectedPrompt?.translation && <><span>English translation</span><p>{selectedExpectedPrompt.translation}</p></>}<small>Compare the spoken audio and visible lip movement with this assigned text before choosing Approve, Decline, or Redo.</small>{selectedReviewRecording.review_comment && !recordingReviewDraft && <div className="saved-clip-comment"><b>Saved reviewer comment</b><p>{selectedReviewRecording.review_comment}</p></div>}</div>}{recordingReviewDraft && <div className="clip-comment-editor"><b>{recordingReviewDraft.decision === "rejected" ? "Why is this video declined?" : "What should the participant improve?"}</b><small>This comment is saved with this video and shown to the participant if it is returned.</small><textarea autoFocus value={recordingReviewDraft.comments} onChange={(event) => setRecordingReviewDraft({ ...recordingReviewDraft, comments: event.target.value })} placeholder="For example: The lips moved out of frame. Please keep your mouth centred and repeat the full sentence." /><div><button className="download" onClick={() => setRecordingReviewDraft(null)}>Cancel</button><button className="primary" disabled={recordingReviewDraft.comments.trim().length < 10} onClick={() => reviewRecording(recordingReviewDraft.recordingId, recordingReviewDraft.decision, recordingReviewDraft.comments)}>Save {recordingReviewDraft.decision === "rejected" ? "decline" : "redo request"}</button></div></div>}</aside>
           </div>

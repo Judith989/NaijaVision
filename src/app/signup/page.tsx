@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import HCaptcha from "@hcaptcha/react-hcaptcha";
 import { backendConfigured, getSupabase } from "../lib/supabase";
 import { Mark } from "../lib/ui";
 
 export default function SignUpPage() {
+  const captchaSiteKey = process.env.NEXT_PUBLIC_HCAPTCHA_SITE_KEY || "";
+  const captchaRef = useRef<HCaptcha>(null);
   const router = useRouter();
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -18,12 +21,15 @@ export default function SignUpPage() {
   const [message, setMessage] = useState("");
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState("");
 
   useEffect(() => {
     const supabase = getSupabase();
     if (!supabase) return;
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) router.replace("/dashboard");
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (!data.user) return;
+      const { data: profile } = await supabase.from("profiles").select("account_status").eq("user_id", data.user.id).maybeSingle();
+      router.replace(profile?.account_status === "active" ? "/dashboard" : "/account-pending");
     });
   }, [router]);
 
@@ -45,18 +51,28 @@ export default function SignUpPage() {
       setMessage("Enter your First name and Last name.");
       return;
     }
+    if (!captchaSiteKey) {
+      setMessage("New account requests are temporarily closed because bot protection is not configured.");
+      return;
+    }
+    if (!captchaToken) {
+      setMessage("Complete the anti-bot check before creating an account.");
+      return;
+    }
     const normalizedFirstName = capitalizeName(firstName);
     const normalizedLastName = capitalizeName(lastName);
     setLoading(true);
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: {
+      options: { captchaToken, data: {
         first_name: normalizedFirstName,
         last_name: normalizedLastName,
         full_name: `${normalizedFirstName} ${normalizedLastName}`,
       } },
     });
+    captchaRef.current?.resetCaptcha();
+    setCaptchaToken("");
     setLoading(false);
     if (error) {
       setMessage(error.message.toLowerCase().includes("already") || error.message.toLowerCase().includes("registered")
@@ -69,7 +85,7 @@ export default function SignUpPage() {
       return;
     }
     if (data.session) {
-      router.push("/dashboard");
+      router.push("/account-pending");
       return;
     }
     setAwaitingConfirmation(true);
@@ -104,7 +120,7 @@ export default function SignUpPage() {
         {awaitingConfirmation ? (
           <div className="notice">
             <Mark>✓</Mark>
-            <p><b>Check your email.</b> NaijaVision sent a confirmation link to {email}. Confirm your address, then <Link href="/signin?next=/dashboard">sign in</Link>.</p>
+            <p><b>Check your email.</b> NaijaVision sent a confirmation link to {email}. Confirm your address, then sign in. An administrator must approve the account before you can continue.</p>
           </div>
         ) : (
           <>
@@ -131,11 +147,13 @@ export default function SignUpPage() {
               </label>
             </div>
 
+            {captchaSiteKey ? <HCaptcha ref={captchaRef} sitekey={captchaSiteKey} onVerify={setCaptchaToken} onExpire={() => setCaptchaToken("")} onError={() => { setCaptchaToken(""); setMessage("The anti-bot check could not load. Refresh the page and try again."); }} /> : <div className="notice"><Mark>!</Mark><p>Account requests are closed until the administrator configures hCaptcha.</p></div>}
+
             {message && <p className="auth-message">{message}</p>}
 
             <div className="footer-actions">
           <Link className="secondary" href="/signin?next=/dashboard">Already have an account?</Link>
-              <button className="primary" disabled={loading || !firstName.trim() || !lastName.trim() || !email.trim() || !passwordsMatch} onClick={handleSignUp}>
+              <button className="primary" disabled={loading || !captchaSiteKey || !captchaToken || !firstName.trim() || !lastName.trim() || !email.trim() || !passwordsMatch} onClick={handleSignUp}>
                 {loading ? "Creating account…" : "Create account"}
               </button>
             </div>
