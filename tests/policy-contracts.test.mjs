@@ -24,12 +24,17 @@ test("new accounts require administrator approval at the database boundary", asy
 });
 
 test("agreed participant and reviewer rates are installed and unpaid totals are recalculated", async () => {
-  const sql = await read("supabase/migrations/202609240002_compensation_rates.sql");
+  const [sql, reviewerControls] = await Promise.all([
+    read("supabase/migrations/202609240002_compensation_rates.sql"),
+    read("supabase/migrations/202609240004_reviewer_policy_controls.sql"),
+  ]);
   assert.match(sql, /750 per completed language set/);
   assert.match(sql, /20 per unique video reviewed/);
   assert.match(sql, /where compensation_basis = 'per_language_completed'\s+and status not in \('payment_processing', 'paid'\)/);
   assert.match(sql, /where status not in \('processing', 'paid'\)/);
   assert.match(sql, /replace_reviewer_compensation_policy/);
+  assert.match(reviewerControls, /v_id uuid := gen_random_uuid\(\)/);
+  assert.match(reviewerControls, /NGN 30 per unique video reviewed/);
 });
 
 test("account cleanup is dry-run by default and always preserves administrators", async () => {
