@@ -56,7 +56,7 @@ export function AdminOperations() {
       supabase.from("profiles").select("user_id,display_name,participant_id,role,account_status,updated_at").in("role", ["reviewer", "admin"]).order("role").order("display_name"),
       supabase.from("submissions").select("id,user_id,participant_id,status,expected_recordings,assigned_reviewer_id,created_at").in("status", ["automated_qc", "awaiting_review", "resubmitted"]).order("created_at"),
       supabase.from("compensation_policies").select("id,amount,currency,pricing_basis,effective_at").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle(),
-      supabase.from("profiles").select("user_id,display_name,participant_id,created_at").eq("account_status", "pending").order("created_at").limit(100),
+      supabase.rpc("list_verified_pending_accounts"),
     ]);
     setWithdrawals(withdrawalResult.data || []);
     setRisks(riskResult.data || []);

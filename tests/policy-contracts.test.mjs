@@ -5,7 +5,10 @@ import test from "node:test";
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("new accounts require administrator approval at the database boundary", async () => {
-  const sql = await read("supabase/migrations/202609240001_account_approval.sql");
+  const [sql, verifiedApproval] = await Promise.all([
+    read("supabase/migrations/202609240001_account_approval.sql"),
+    read("supabase/migrations/202609240003_verified_account_approval.sql"),
+  ]);
   assert.match(sql, /account_status set default 'pending'/);
   assert.match(sql, /values \(new\.id, v_display_name, 'pending', 'none'\)/);
   assert.match(sql, /create or replace function public\.approve_account/);
@@ -15,6 +18,9 @@ test("new accounts require administrator approval at the database boundary", asy
   assert.match(sql, /raw_recordings_active_participant_insert/);
   assert.match(sql, /v_pending_count >= 100/);
   assert.match(sql, /public\.is_reviewer\(\) and assigned_reviewer_id = auth\.uid\(\)/);
+  assert.match(verifiedApproval, /create or replace function public\.list_verified_pending_accounts/);
+  assert.match(verifiedApproval, /u\.email_confirmed_at is not null/);
+  assert.match(verifiedApproval, /The applicant must verify their email before approval/);
 });
 
 test("agreed participant and reviewer rates are installed and unpaid totals are recalculated", async () => {
