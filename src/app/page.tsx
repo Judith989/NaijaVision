@@ -8,6 +8,7 @@ import { corePrompts, safeSpeechPrompts } from "./prompts";
 import { backendConfigured, getCurrentRole, getSupabase } from "./lib/supabase";
 import { sha256, uploadRecording } from "./lib/uploads";
 import { AdminOperations } from "./AdminOperations";
+import { recordedCategories, type CategoryRecording } from "./lib/recordedCategories";
 import { BASE_PATH } from "./lib/basePath";
 
 type Step = "welcome" | "account" | "study" | "consent" | "profile" | "calibrate" | "record" | "review" | "complete" | "reviewer";
@@ -38,7 +39,7 @@ type RecordingJoinRow = {
 };
 type RecordingReviewRow = { recording_id: string; decision: "approved" | "rejected" | "changes_requested"; comments?: string | null };
 type ReviewerPaymentRow = { reviewed_video_count: number; rate_per_video: number; amount: number; currency: string; status: string };
-type ReviewQueueItem = { id: string; user_id: string; participant_id: string; status: string; expected_recordings: number; created_at: string; assigned_reviewer_id: string | null; recommendation?: "approved" | "rejected" | "changes_requested"; recommendation_status?: "pending" | "returned" | "accepted" | "participant_returned"; recommendation_updated_at?: string };
+type ReviewQueueItem = { recordings: CategoryRecording[]; id: string; user_id: string; participant_id: string; status: string; expected_recordings: number; created_at: string; assigned_reviewer_id: string | null; recommendation?: "approved" | "rejected" | "changes_requested"; recommendation_status?: "pending" | "returned" | "accepted" | "participant_returned"; recommendation_updated_at?: string };
 
 function joinedPromptId(row: RecordingJoinRow) {
   return Array.isArray(row.prompt_assignments) ? row.prompt_assignments[0]?.prompt_id || "" : row.prompt_assignments?.prompt_id || "";
@@ -392,7 +393,7 @@ export default function Home() {
     let active = true;
     const refreshQueue = async () => {
       let query = supabase.from("submissions")
-        .select("id,user_id,participant_id,status,expected_recordings,created_at,assigned_reviewer_id")
+        .select("id,user_id,participant_id,status,expected_recordings,created_at,assigned_reviewer_id,recordings(language,prompt_assignments(prompt_id))")
         .in("status", ["automated_qc", "awaiting_review", "resubmitted", "payment_eligible", "payment_processing"])
         .order("created_at", { ascending: true });
       if (currentRole === "reviewer" && authenticatedUserId) query = query.eq("assigned_reviewer_id", authenticatedUserId);
@@ -2076,6 +2077,11 @@ export default function Home() {
           {backendConfigured && <div className="submission-selector"><label><span>{currentRole === "admin" ? "Select a participant submission" : "Select an assigned submission"}</span><select value={selectedReviewId} onChange={(event) => event.target.value ? selectReviewerSubmission(event.target.value) : setSelectedReviewId("")}><option value="">Choose a submission</option>{reviewQueue.map((item) => <option key={item.id} value={item.id}>{item.participant_id} | {item.status.replaceAll("_", " ")} | {item.expected_recordings} recordings | {new Date(item.created_at).toLocaleDateString()}</option>)}</select></label>{reviewQueue.length === 0 && <p>{currentRole === "admin" ? "No submissions are awaiting action." : "No submissions are assigned to you yet. An administrator must assign one first."}</p>}</div>}
           {selectedReviewId ? <>
           <div className="selected-submission-banner"><span>Currently reviewing</span><b>{selectedReviewSubmission?.participant_id || "Unknown participant"}</b><small>Submission {selectedReviewId.slice(0, 8)} | {selectedReviewSubmission?.status.replaceAll("_", " ")}</small></div>
+          <section className="recorded-categories" aria-labelledby="recorded-categories-heading">
+            <h3 id="recorded-categories-heading">Recorded language categories</h3>
+            <p>Languages present in this submission, with NaijaSafeSpeech (hate speech) recordings listed separately.</p>
+            {selectedReviewSubmission ? selectedReviewSubmission.recordings.length ? <ul>{recordedCategories(selectedReviewSubmission.recordings).map((category) => <li key={JSON.stringify([category.language, category.safeSpeech])}><b>{category.language}{category.safeSpeech ? " — NaijaSafeSpeech (hate speech)" : " — Regular"}</b><span>{category.count} recording{category.count === 1 ? "" : "s"}</span></li>)}</ul> : <p>No recordings in this submission.</p> : <p>Loading recorded categories…</p>}
+          </section>
           <div className="metric-grid"><div><span>Participant</span><b className="small-metric">{selectedReviewSubmission?.participant_id || "Unknown"}</b><small>pseudonymous ID</small></div><div><span>Recordings</span><b>{reviewerRecords.length}</b><small>of {selectedReviewSubmission?.expected_recordings || 0} expected</small></div><div><span>Clip decisions</span><b className="small-metric">{reviewerRecords.filter((record) => record.review_decision).length} of {reviewerRecords.length}</b><small>reviewed individually</small></div><div><span>Final status</span><b className="small-metric">{selectedReviewSubmission?.status.replaceAll("_", " ")}</b><small>administrator controlled</small></div></div>
           <div className="review-media-layout">
           <div className="data-card">
