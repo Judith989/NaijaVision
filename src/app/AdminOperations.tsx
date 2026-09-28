@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import { backendConfigured, getSupabase } from "./lib/supabase";
 
+import { surveyLanguages } from "./lib/surveyLanguages";
+import { recordedCategories, type CategoryRecording } from "./lib/recordedCategories";
+
 type Row = Record<string, unknown>;
 
 function related(row: Row, key: string): Row {
@@ -17,6 +20,22 @@ function ParticipantPaymentRow({ row, onMarkPaid }: { row: Row; onMarkPaid: (id:
     <span><b>{String(submission.participant_id || "Participant")}</b><small>{String(row.amount)} {String(row.currency)} due | {String(row.status)}</small><small>{String(account.bank_name || "Verified bank")} | {String(account.account_name || "Verified account")} | ending {String(account.account_last4 || "----")}</small></span>
     <button onClick={() => onMarkPaid(String(row.id))}>Mark paid</button>
   </div>;
+}
+
+async function withSelectedLanguages(profiles: Row[]): Promise<Row[]> {
+  const supabase = getSupabase();
+  if (!supabase || !profiles.length) return profiles;
+  const { data, error } = await supabase.from("surveys")
+    .select("user_id,responses,version")
+    .in("user_id", profiles.map((profile) => String(profile.user_id)))
+    .order("version", { ascending: false });
+  const latest = new Map<string, unknown>();
+  for (const survey of data || []) {
+    if (!latest.has(survey.user_id)) latest.set(survey.user_id, survey.responses);
+  }
+  return profiles.map((profile) => ({ ...profile, selectedLanguagesLabel: error
+    ? "Languages unavailable"
+    : surveyLanguages(latest.get(String(profile.user_id))).join(", ") || "No languages selected" }));
 }
 
 export function AdminOperations() {
@@ -54,7 +73,7 @@ export function AdminOperations() {
       supabase.from("audit_events").select("id,action,entity_type,entity_id,created_at").order("created_at", { ascending: false }).limit(25),
       supabase.from("dataset_releases").select("*").order("created_at", { ascending: false }),
       supabase.from("profiles").select("user_id,display_name,participant_id,role,account_status,updated_at").in("role", ["reviewer", "admin"]).order("role").order("display_name"),
-      supabase.from("submissions").select("id,user_id,participant_id,status,expected_recordings,assigned_reviewer_id,created_at").in("status", ["automated_qc", "awaiting_review", "resubmitted"]).order("created_at"),
+      supabase.from("submissions").select("id,user_id,participant_id,status,expected_recordings,assigned_reviewer_id,created_at,recordings(language,prompt_assignments(prompt_id))").in("status", ["automated_qc", "awaiting_review", "resubmitted"]).order("created_at"),
       supabase.from("compensation_policies").select("id,amount,currency,pricing_basis,effective_at").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle(),
       supabase.rpc("list_verified_pending_accounts"),
     ]);
@@ -69,7 +88,7 @@ export function AdminOperations() {
     }
     setAudit(auditResult.data || []);
     setReleases(releaseResult.data || []);
-    setStaffMembers(staffMemberResult.data || []);
+    setStaffMembers(await withSelectedLanguages(staffMemberResult.data || []));
     setPendingSubmissions(submissionResult.data || []);
     setActivePolicy(policyResult.data || null);
     setPendingAccounts(pendingAccountResult.data || []);
@@ -82,7 +101,7 @@ export function AdminOperations() {
     const term = participantQuery.trim();
     if (term) query = query.or(`display_name.ilike.%${term}%,participant_id.ilike.%${term}%`);
     const { data } = await query;
-    setParticipants(data || []);
+    setParticipants(await withSelectedLanguages(data || []));
   }
 
   async function promoteParticipant(id: string, newRole: "reviewer" | "admin") {
@@ -263,11 +282,11 @@ export function AdminOperations() {
     <div className="metric-grid"><div><span>Account requests</span><b>{pendingAccounts.length}</b><small>New accounts awaiting approval</small></div><div><span>Pending reviews</span><b>{pendingSubmissions.length}</b><small>Submissions requiring assignment or action</small></div><div><span>Reviewers</span><b>{staffMembers.filter((member) => member.role === "reviewer").length}</b><small>Active reviewer accounts</small></div><div><span>Participant payments</span><b>₦{payments.reduce((total, payment) => total + Number(payment.amount || 0), 0).toLocaleString()}</b><small>Eligible, processing, or failed</small></div><div><span>Reviewer payments</span><b>₦{reviewerPayments.reduce((total, payment) => total + Number(payment.amount || 0), 0).toLocaleString()}</b><small>Eligible, processing, or failed</small></div></div>
     <div className="ops-grid">
       <div className="ops-card wide-ops-card"><h3>Pending account requests</h3><p className="ops-hint">Approve a verified applicant before they can access consent, surveys, recordings, or staff work.</p>{pendingAccounts.length ? pendingAccounts.map((row) => <div className="ops-row" key={String(row.user_id)}><span><b>{String(row.display_name || "Unnamed")}</b> | {String(row.participant_id)}<small>Requested {new Date(String(row.created_at)).toLocaleString()}</small></span><button onClick={() => decideAccount(String(row.user_id), true)}>Approve account</button><button className="danger" onClick={() => decideAccount(String(row.user_id), false)}>Decline</button></div>) : <p>No accounts are awaiting approval.</p>}</div>
-      <div className="ops-card"><h3>Reviewers and administrators</h3><p className="ops-hint">Reviewers assess assigned media. Administrators assign work, make final decisions, manage payments, and control releases.</p>{staffMembers.length ? staffMembers.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} | {String(row.participant_id)} | {String(row.role)}</span>{row.role === "reviewer" ? <button onClick={() => changeStaffRole(String(row.user_id), "admin")}>Make admin</button> : <button onClick={() => changeStaffRole(String(row.user_id), "reviewer")}>Make reviewer</button>}<button onClick={() => changeStaffRole(String(row.user_id), "participant")}>Remove access</button></div>) : <p>No reviewer or administrator accounts found.</p>}</div>
-      <div className="ops-card"><h3>Add a reviewer or administrator</h3><p className="ops-hint">Find an existing participant account, then grant the appropriate role.</p><input value={participantQuery} onChange={(event) => setParticipantQuery(event.target.value)} placeholder="Search by name or participant ID" /><button className="primary" onClick={searchParticipants}>Search</button>{participants.length ? participants.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} | {String(row.participant_id)}</span><button onClick={() => promoteParticipant(String(row.user_id), "reviewer")}>Make reviewer</button><button onClick={() => promoteParticipant(String(row.user_id), "admin")}>Make admin</button></div>) : <p>No participants found.</p>}</div>
+      <div className="ops-card"><h3>Reviewers and administrators</h3><p className="ops-hint">Reviewers assess assigned media. Administrators assign work, make final decisions, manage payments, and control releases.</p>{staffMembers.length ? staffMembers.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} | {String(row.participant_id)} | {String(row.role)}<small>Selected languages: {String(row.selectedLanguagesLabel)}</small></span>{row.role === "reviewer" ? <button onClick={() => changeStaffRole(String(row.user_id), "admin")}>Make admin</button> : <button onClick={() => changeStaffRole(String(row.user_id), "reviewer")}>Make reviewer</button>}<button onClick={() => changeStaffRole(String(row.user_id), "participant")}>Remove access</button></div>) : <p>No reviewer or administrator accounts found.</p>}</div>
+      <div className="ops-card"><h3>Add a reviewer or administrator</h3><p className="ops-hint">Find an existing participant account, then grant the appropriate role.</p><input value={participantQuery} onChange={(event) => setParticipantQuery(event.target.value)} placeholder="Search by name or participant ID" /><button className="primary" onClick={searchParticipants}>Search</button>{participants.length ? participants.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} | {String(row.participant_id)}<small>Selected languages: {String(row.selectedLanguagesLabel)}</small></span><button onClick={() => promoteParticipant(String(row.user_id), "reviewer")}>Make reviewer</button><button onClick={() => promoteParticipant(String(row.user_id), "admin")}>Make admin</button></div>) : <p>No participants found.</p>}</div>
       <div className="ops-card"><h3>Participant compensation policy</h3><p className="ops-hint">This rate applies separately to each completed regular language set and each completed NaijaSafeSpeech language set. Code-switched combinations do not count as extra units. Payment still requires administrator approval.</p>{activePolicy && <p><b>Current:</b> {String(activePolicy.amount)} {String(activePolicy.currency)} per completed language set</p>}<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Amount per completed language set" /><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option>NGN</option><option>GHS</option><option>USD</option><option>GBP</option><option>EUR</option></select><button className="primary" onClick={createPolicy}>Replace active policy</button></div>
       <div className="ops-card"><h3>Reviewer compensation policy</h3><p className="ops-hint">Reviewers earn once for each unique video reviewed. Reviewing a replacement again does not duplicate the fee for that prompt.</p>{reviewerPolicy ? <><p><b>Current:</b> {savedReviewerRate} {savedReviewerCurrency} per video</p><p>50 videos × {reviewerCurrencyPrefix}{savedReviewerRate.toLocaleString()} = {reviewerCurrencyPrefix}{(50 * savedReviewerRate).toLocaleString()}</p><p>10 participants × 50 videos × {reviewerCurrencyPrefix}{savedReviewerRate.toLocaleString()} = {reviewerCurrencyPrefix}{(500 * savedReviewerRate).toLocaleString()}</p></> : <p>No active reviewer policy is configured.</p>}<input inputMode="decimal" value={reviewerAmount} onChange={(event) => setReviewerAmount(event.target.value)} placeholder="Amount per unique reviewed video" /><select value={reviewerCurrency} onChange={(event) => setReviewerCurrency(event.target.value)}><option>NGN</option><option>GHS</option><option>USD</option><option>GBP</option><option>EUR</option></select><button className="primary" onClick={createReviewerPolicy}>Replace reviewer policy</button></div>
-      <div className="ops-card wide-ops-card"><h3>Submission assignments</h3><p className="ops-hint">Assign each pending submission to a different reviewer. Reviewers cannot assess their own recordings. Administrators retain access for testing and final decisions.</p>{pendingSubmissions.length ? pendingSubmissions.map((row) => <div className="ops-row assignment-row" key={String(row.id)}><span>{String(row.participant_id)} | {String(row.status)} | {String(row.expected_recordings)} recordings</span><select value={reviewerAssignments[String(row.id)] || String(row.assigned_reviewer_id || "")} onChange={(event) => setReviewerAssignments((current) => ({ ...current, [String(row.id)]: event.target.value }))}><option value="">Select reviewer</option>{staffMembers.filter((member) => member.role === "reviewer" && member.user_id !== row.user_id).map((member) => <option key={String(member.user_id)} value={String(member.user_id)}>{String(member.display_name || member.participant_id)}</option>)}</select><button onClick={() => assignSubmission(String(row.id))}>{row.assigned_reviewer_id ? "Reassign" : "Assign"}</button></div>) : <p>No submissions need assignment.</p>}</div>
+      <div className="ops-card wide-ops-card"><h3>Submission assignments</h3><p className="ops-hint">Assign each pending submission to a different reviewer. Reviewers cannot assess their own recordings. Administrators retain access for testing and final decisions.</p>{pendingSubmissions.length ? pendingSubmissions.map((row) => <div className="ops-row assignment-row" key={String(row.id)}><span>{String(row.participant_id)} | {String(row.status)} | {String(row.expected_recordings)} recordings<small>Recorded categories: {recordedCategories((row.recordings || []) as CategoryRecording[]).map((category) => `${category.language}${category.safeSpeech ? " (NaijaSafeSpeech)" : ""}`).join(", ") || "No recordings yet"}</small></span><select value={reviewerAssignments[String(row.id)] || String(row.assigned_reviewer_id || "")} onChange={(event) => setReviewerAssignments((current) => ({ ...current, [String(row.id)]: event.target.value }))}><option value="">Select reviewer</option>{staffMembers.filter((member) => member.role === "reviewer" && member.user_id !== row.user_id).map((member) => <option key={String(member.user_id)} value={String(member.user_id)}>{String(member.display_name || member.participant_id)} | {String(member.selectedLanguagesLabel)}</option>)}</select><button onClick={() => assignSubmission(String(row.id))}>{row.assigned_reviewer_id ? "Reassign" : "Assign"}</button></div>) : <p>No submissions need assignment.</p>}</div>
       <div className="ops-card"><h3>Dataset release</h3><input value={releaseName} onChange={(event) => setReleaseName(event.target.value)} placeholder="Dataset name" /><input value={releaseVersion} onChange={(event) => setReleaseVersion(event.target.value)} placeholder="Version, e.g. 1.0" /><button className="primary" disabled={!releaseVersion} onClick={createRelease}>Create release draft</button></div>
     </div>
     <div className="ops-grid">
