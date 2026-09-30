@@ -267,6 +267,7 @@ export default function Home() {
     supabase.auth.getUser().then(async ({ data }) => {
       const requestedMode = new URLSearchParams(window.location.search);
       const editingPayment = requestedMode.get("payment") === "edit";
+      const editingSurvey = requestedMode.get("survey") === "edit";
       setPaymentEditMode(editingPayment);
       if (!data.user) {
         if (requestedMode.get("contribute") === "1" || requestedMode.get("reviewer") === "1" || requestedMode.get("admin") === "1") window.location.replace(`${BASE_PATH}/signin?next=/dashboard`);
@@ -285,7 +286,7 @@ export default function Home() {
       if (requestedMode.get("contribute") === "1") {
         const { data: latestSubmission } = await supabase
           .from("submissions")
-          .select("id,status,survey_id,consent_id,compensation_amount,compensation_currency,completed_language_count,completed_standard_language_count,completed_safe_speech_language_count")
+          .select("id,status,survey_id,consent_id,accepted_recordings,compensation_amount,compensation_currency,completed_language_count,completed_standard_language_count,completed_safe_speech_language_count")
           .eq("user_id", data.user.id)
           .order("created_at", { ascending: false })
           .limit(1)
@@ -332,7 +333,12 @@ export default function Home() {
             accountNumber: savedPayout.account_last4,
           }));
           setBankVerified(true);
-          if (activeSubmission) openCalibration("record");
+          if (editingSurvey && activeSubmission && Number(activeSubmission.accepted_recordings || 0) > 0) {
+            setToast("Language selection is locked after recording begins. Contact support if a correction is necessary.");
+            openCalibration("record");
+          } else if (editingSurvey) {
+            setStep(savedConsent ? "profile" : "study");
+          } else if (activeSubmission) openCalibration("record");
           else if (latestSubmission && ["paid", "rejected", "withdrawn"].includes(latestSubmission.status) && savedResponses && savedConsent) {
             const { data: newSubmissionId, error: startError } = await supabase.rpc("start_next_submission");
             if (startError) {

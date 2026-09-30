@@ -60,3 +60,15 @@ test("public authentication remains usable and privileged edge calls require act
   assert.match(security, /eq\("role", "admin"\)\.eq\("account_status", "active"\)/);
   assert.match(payout, /requireActiveAccount\(user\.id\)/);
 });
+
+test("participants can correct language selection before recording and are warned when it is missing", async () => {
+  const [contribution, dashboard] = await Promise.all([
+    read("src/app/page.tsx"),
+    read("src/app/dashboard/page.tsx"),
+  ]);
+  assert.match(contribution, /requestedMode\.get\("survey"\) === "edit"/);
+  assert.match(contribution, /Language selection is locked after recording begins/);
+  assert.match(dashboard, /No languages are selected/);
+  assert.match(dashboard, /Update language selection/);
+  assert.match(dashboard, /survey=edit/);
+});
