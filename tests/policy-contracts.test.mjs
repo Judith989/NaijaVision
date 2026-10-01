@@ -59,6 +59,8 @@ test("public authentication remains usable and privileged edge calls require act
   assert.match(signup, /administrator must approve the account/i);
   assert.match(security, /eq\("role", "admin"\)\.eq\("account_status", "active"\)/);
   assert.match(payout, /requireActiveAccount\(user\.id\)/);
+  assert.match(payout, /providerMessage/);
+  assert.match(await read("src/app/page.tsx"), /edgeFunctionErrorMessage/);
 });
 
 test("participants can correct language selection before recording and are warned when it is missing", async () => {

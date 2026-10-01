@@ -45,6 +45,27 @@ function joinedPromptId(row: RecordingJoinRow) {
   return Array.isArray(row.prompt_assignments) ? row.prompt_assignments[0]?.prompt_id || "" : row.prompt_assignments?.prompt_id || "";
 }
 
+async function edgeFunctionErrorMessage(error: unknown, fallback: string) {
+  if (!error || typeof error !== "object") return fallback;
+  const context = "context" in error ? (error as { context?: unknown }).context : undefined;
+  if (context instanceof Response) {
+    try {
+      const payload = await context.clone().json() as { error?: string; message?: string };
+      if (payload.error || payload.message) return payload.error || payload.message || fallback;
+    } catch {
+      try {
+        const body = await context.clone().text();
+        if (body.trim()) return body.trim();
+      } catch {
+        // Fall through to the SDK error below.
+      }
+    }
+  }
+  return "message" in error && typeof (error as { message?: unknown }).message === "string"
+    ? (error as { message: string }).message
+    : fallback;
+}
+
 const languages = ["Igbo", "Yorùbá", "Hausa", "Nigerian Pidgin", "Nigerian English"];
 const countries = ["Nigeria", "Ghana", "Cameroon", "Benin", "Togo", "Other"];
 const educationOptions = ["No formal education", "Primary", "Secondary", "Vocational", "Bachelor's", "Master's", "Doctorate", "Other"];
@@ -916,7 +937,8 @@ export default function Home() {
     setVerifyingBank(false);
     if (error || data?.error) {
       setBankVerified(false);
-      setAuthMessage(`Bank details could not be verified: ${data?.error || error?.message || "Verification failed."}`);
+      const message = data?.error || await edgeFunctionErrorMessage(error, "Verification failed.");
+      setAuthMessage(`Bank details could not be verified: ${message}`);
       return;
     }
     setAccount((current) => ({ ...current, accountName: data.accountName || current.accountName }));

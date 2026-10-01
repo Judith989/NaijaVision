@@ -20,7 +20,12 @@ Deno.serve(async (request) => {
     });
     const resolveData = await resolveResponse.json();
     const resolvedName = resolveData.data?.account_name;
-    if (!resolveResponse.ok || !resolvedName) return json({ error: "The account number could not be matched to the selected bank." }, 422);
+    if (!resolveResponse.ok || !resolvedName) {
+      const providerMessage = typeof resolveData?.message === "string" ? resolveData.message : "";
+      return json({
+        error: providerMessage || "The account number could not be matched to the selected bank. Check the bank and account number, then try again.",
+      }, 422);
+    }
 
     const providerResponse = await fetch("https://api.paystack.co/transferrecipient", {
       method: "POST",
@@ -33,8 +38,13 @@ Deno.serve(async (request) => {
         currency: "NGN",
       }),
     });
-    if (!providerResponse.ok) return json({ error: "The bank account could not be verified." }, 422);
     const providerData = await providerResponse.json();
+    if (!providerResponse.ok) {
+      const providerMessage = typeof providerData?.message === "string" ? providerData.message : "";
+      return json({
+        error: providerMessage || "The verified bank account could not be prepared for payment. Please try again or contact NaijaVision support.",
+      }, 422);
+    }
     const recipientCode = providerData.recipient_code || providerData.data?.recipient_code || providerData.token;
     if (!recipientCode) return json({ error: "The payment provider returned no recipient token." }, 502);
 
