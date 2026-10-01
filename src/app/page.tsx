@@ -230,6 +230,7 @@ export default function Home() {
   const [reviewMedia, setReviewMedia] = useState("");
   const [selectedReviewRecordingId, setSelectedReviewRecordingId] = useState("");
   const [recordingReviewDraft, setRecordingReviewDraft] = useState<{ recordingId: string; decision: "rejected" | "changes_requested"; comments: string } | null>(null);
+  const [bulkReviewDraft, setBulkReviewDraft] = useState<{ decision: "rejected" | "changes_requested"; comments: string } | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [submissionId, setSubmissionId] = useState("");
   const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>([]);
@@ -1184,6 +1185,40 @@ export default function Home() {
     }
   }
 
+  async function reviewAllRecordings(decision: "approved" | "rejected" | "changes_requested", comments = "") {
+    const reviewable = reviewerRecords.filter((record) => !record.storage_deleted_at);
+    if (!reviewable.length) return setToast("There are no available recordings to review.");
+    if (decision !== "approved" && comments.trim().length < 10) {
+      setRecordingReviewDraft(null);
+      setBulkReviewDraft({ decision, comments });
+      return;
+    }
+    const supabase = getSupabase();
+    const target = selectedReviewId || submissionId;
+    if (!supabase || !target || !authenticatedUserId) return;
+    const rows = reviewable.map((record) => ({
+      submission_id: target,
+      recording_id: record.id,
+      reviewer_id: authenticatedUserId,
+      decision,
+      reason_codes: decision === "rejected" ? ["manual_quality_rejection"] : decision === "changes_requested" ? ["participant_redo_requested"] : [],
+      comments: decision === "approved" ? null : comments.trim(),
+      transcript_correct: decision === "approved",
+      framing_correct: decision === "approved",
+      audio_acceptable: decision === "approved",
+      privacy_acceptable: decision === "approved",
+    }));
+    const { error } = await supabase.from("reviews").upsert(rows, { onConflict: "recording_id,reviewer_id" });
+    if (error) return setToast(error.message);
+    setReviewerRecords((records) => records.map((record) => record.storage_deleted_at ? record : {
+      ...record,
+      review_decision: decision,
+      review_comment: decision === "approved" ? undefined : comments.trim(),
+    }));
+    setBulkReviewDraft(null);
+    setToast(`${reviewable.length} recordings marked ${decision === "approved" ? "approved" : decision === "rejected" ? "declined" : "for redo"}.`);
+  }
+
   async function selectReviewerSubmission(id: string) {
     setReviewComments("");
     setAdminDecisionComments("");
@@ -1191,6 +1226,7 @@ export default function Home() {
     setReviewMedia("");
     setSelectedReviewRecordingId("");
     setRecordingReviewDraft(null);
+    setBulkReviewDraft(null);
     setSelectedReviewId(id);
   }
 
@@ -1726,6 +1762,11 @@ export default function Home() {
   const everyRecordingReviewed = reviewerRecords.length > 0 && reviewerRecords.every((record) => Boolean(record.review_decision));
   const everyRecordingApproved = reviewerRecords.length > 0 && reviewerRecords.every((record) => record.review_decision === "approved");
   const hasRecordingForRedo = reviewerRecords.some((record) => record.review_decision === "rejected" || record.review_decision === "changes_requested");
+  const reviewDecisionCounts = reviewerRecords.reduce((counts, record) => {
+    const key = record.review_decision || "pending";
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {} as Record<string, number>);
   const reviewerVideoCount = reviewerPayments.reduce((total, payment) => total + payment.reviewed_video_count, 0);
   const reviewerTotalEarned = reviewerPayments.reduce((total, payment) => total + payment.amount, 0);
   const reviewerPaid = reviewerPayments.filter((payment) => payment.status === "paid").reduce((total, payment) => total + payment.amount, 0);
@@ -1880,7 +1921,7 @@ export default function Home() {
             ].map(([key, title, detail]) => (
               <label className="check-card" key={key}>
                 <input type="checkbox" checked={consent[key as keyof typeof consent]} onChange={(e) => setConsent({ ...consent, [key]: e.target.checked })} />
-                <span className="checkbox">✓</span><span><b>{title}</b><small>{detail}</small></span>
+                <span className="checkbox">✓</span><span><b>{title} <em className="required-badge">Required</em></b><small>{detail}</small></span>
               </label>
             ))}
           </div>
@@ -1914,13 +1955,13 @@ export default function Home() {
           </div></div>
 
           <div className="survey-section"><h3><span>C</span> Language background and code-switching</h3><div className="form-grid">
-            <label className="wide"><span>Native languages <small>select multiple</small></span><MultiSelect options={languages} value={profile.nativeLanguages} onChange={(value) => setProfile({ ...profile, nativeLanguages: value })} /></label>
-            <label className="wide"><span>Other languages spoken <small>select multiple</small></span><MultiSelect options={languages} value={profile.otherLanguages} onChange={(value) => setProfile({ ...profile, otherLanguages: value })} /></label>
+            <label className="wide"><span>Native languages <small>required · select multiple</small></span><MultiSelect options={languages} value={profile.nativeLanguages} onChange={(value) => setProfile({ ...profile, nativeLanguages: value })} /></label>
+            <label className="wide"><span>Other languages spoken <small>optional · select multiple</small></span><MultiSelect options={languages} value={profile.otherLanguages} onChange={(value) => setProfile({ ...profile, otherLanguages: value })} /></label>
             <label><span>Primary language</span><select value={profile.primary} onChange={(e) => setProfile({ ...profile, primary: e.target.value })}><option value="">Select language</option>{languages.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label><span>Dialect or accent <small>optional</small></span><input value={profile.dialect} onChange={(e) => setProfile({ ...profile, dialect: e.target.value })} placeholder="e.g. Owerri Igbo" /></label>
             <label><span>Primary language used at home</span><select value={profile.homeLanguage} onChange={(e) => setProfile({ ...profile, homeLanguage: e.target.value })}><option value="">Select language</option>{languages.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label><span>Primary language used at work or school</span><select value={profile.workLanguage} onChange={(e) => setProfile({ ...profile, workLanguage: e.target.value })}><option value="">Select language</option>{languages.map((item) => <option key={item}>{item}</option>)}</select></label>
-            <label className="wide"><span>Languages used daily</span><MultiSelect options={languages} value={profile.dailyLanguages} onChange={(value) => setProfile({ ...profile, dailyLanguages: value })} /></label>
+            <label className="wide"><span>Languages used daily <small>required · select multiple</small></span><MultiSelect options={languages} value={profile.dailyLanguages} onChange={(value) => setProfile({ ...profile, dailyLanguages: value })} /></label>
             <label><span>Can you read your primary language?</span><select value={profile.canRead} onChange={(e) => setProfile({ ...profile, canRead: e.target.value })}><option value="">Select an answer</option><option>Yes</option><option>No</option><option>Partially</option></select></label>
             <label><span>Can you write your primary language?</span><select value={profile.canWrite} onChange={(e) => setProfile({ ...profile, canWrite: e.target.value })}><option value="">Select an answer</option><option>Yes</option><option>No</option><option>Partially</option></select></label>
             <label><span>How often do you switch languages?</span><select value={profile.switchingFrequency} onChange={(e) => setProfile({ ...profile, switchingFrequency: e.target.value })}><option value="">Select frequency</option>{["Never","Rarely","Sometimes","Frequently","Always"].map((item) => <option key={item}>{item}</option>)}</select></label>
@@ -1933,15 +1974,15 @@ export default function Home() {
             <label><span>Hearing impairment</span><select value={profile.hearingImpairment} onChange={(e) => setProfile({ ...profile, hearingImpairment: e.target.value })}><option value="">Select an answer</option><option>No</option><option>Yes</option></select></label>
             <label><span>Normally wear glasses?</span><select value={profile.glasses} onChange={(e) => setProfile({ ...profile, glasses: e.target.value })}><option value="">Select an answer</option><option>Yes</option><option>No</option></select></label>
             <label><span>Face covering while speaking</span><select value={profile.faceCovering} onChange={(e) => setProfile({ ...profile, faceCovering: e.target.value })}><option value="">Select frequency</option><option>Frequently</option><option>Occasionally</option><option>Never</option></select></label>
-            <label className="wide"><span>Accessibility tools <small>select multiple</small></span><MultiSelect options={accessibilityOptions} value={profile.accessibility} onChange={(value) => setProfile({ ...profile, accessibility: value })} /></label>
+            <label className="wide"><span>Accessibility tools <small>required · select at least one, including None</small></span><MultiSelect options={accessibilityOptions} value={profile.accessibility} onChange={(value) => setProfile({ ...profile, accessibility: value })} /></label>
           </div></div>
 
           <div className="survey-section"><h3><span>E</span> Device and recording environment</h3><div className="form-grid">
             <label><span>Device type</span><select value={profile.deviceType} onChange={(e) => setProfile({ ...profile, deviceType: e.target.value })}><option value="">Select device type</option>{deviceTypes.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label><span>Operating system</span><select value={profile.operatingSystem} onChange={(e) => setProfile({ ...profile, operatingSystem: e.target.value })}><option value="">Select OS</option>{operatingSystems.map((item) => <option key={item}>{item}</option>)}</select></label>
-            <label><span>Device brand</span><input value={profile.deviceBrand} onChange={(e) => setProfile({ ...profile, deviceBrand: e.target.value })} placeholder="Samsung, Apple, Tecno, Infinix" /></label>
+            <label><span>Device brand <small>optional</small></span><input value={profile.deviceBrand} onChange={(e) => setProfile({ ...profile, deviceBrand: e.target.value })} placeholder="Samsung, Apple, Tecno, Infinix" /></label>
             <label><span>Device model <small>optional</small></span><input value={profile.deviceModel} onChange={(e) => setProfile({ ...profile, deviceModel: e.target.value })} /></label>
-            <label><span>Camera resolution <small>if known</small></span><input value={profile.cameraResolution} onChange={(e) => setProfile({ ...profile, cameraResolution: e.target.value })} placeholder="e.g. 1080p" /></label>
+            <label><span>Camera resolution <small>optional · only if known</small></span><input value={profile.cameraResolution} onChange={(e) => setProfile({ ...profile, cameraResolution: e.target.value })} placeholder="You may leave this blank" /></label>
             <label><span>Microphone type</span><select value={profile.microphoneType} onChange={(e) => setProfile({ ...profile, microphoneType: e.target.value })}><option value="">Select microphone type</option>{["Built-in","Wired headset","Bluetooth headset","USB microphone","External microphone","Unknown"].map((item) => <option key={item}>{item}</option>)}</select></label>
             <label><span>How long have you used this device?</span><select value={profile.deviceAge} onChange={(e) => setProfile({ ...profile, deviceAge: e.target.value })}><option value="">Select duration</option>{["Less than 6 months","6–12 months","1–2 years","More than 2 years"].map((item) => <option key={item}>{item}</option>)}</select></label>
             <label><span>Device ownership</span><select value={profile.deviceOwnership} onChange={(e) => setProfile({ ...profile, deviceOwnership: e.target.value })}><option value="">Select ownership</option><option>Personal</option><option>Shared</option><option>Borrowed</option></select></label>
@@ -2127,6 +2168,12 @@ export default function Home() {
           <div className="review-media-layout">
           <div className="data-card">
             <div className="table-head"><div><h3>Submission media</h3><p>Check prompt accuracy, mouth-only framing, audio quality, duplicates, and private information.</p></div></div>
+            {currentRole === "reviewer" && <div className="bulk-review-toolbar" aria-label="Decide all recordings">
+              <div><b>Apply one decision to all {reviewerRecords.filter((record) => !record.storage_deleted_at).length} available recordings</b><small>{reviewDecisionCounts.approved || 0} approved · {reviewDecisionCounts.rejected || 0} declined · {reviewDecisionCounts.changes_requested || 0} redo · {reviewDecisionCounts.pending || 0} pending</small></div>
+              <button className="download bulk-approve" onClick={() => { if (window.confirm("Approve every available recording in this submission?")) void reviewAllRecordings("approved"); }}>Approve all</button>
+              <button className="download danger" onClick={() => setBulkReviewDraft({ decision: "rejected", comments: "" })}>Decline all</button>
+              <button className="download redo" onClick={() => setBulkReviewDraft({ decision: "changes_requested", comments: "" })}>Redo all</button>
+            </div>}
             <div className="table-wrap"><table><thead><tr><th>Prompt</th><th>Language</th><th>Type</th><th>Duration</th><th>Quality</th><th>Media</th><th>Decision</th></tr></thead><tbody>{backendConfigured ? reviewerRecords.map((record) => <tr key={record.id} className={record.id === selectedReviewRecordingId ? "active-recording-row" : ""}><td><b>{record.prompt_id}</b>{record.storage_deleted_at && <small>Archived locally</small>}</td><td>{record.language}</td><td>{[...corePrompts, ...safeSpeechPrompts].find((prompt) => prompt.id === record.prompt_id)?.type}</td><td>{Number(record.duration_seconds).toFixed(1)}s</td><td><span className={`status ${record.storage_deleted_at ? "accepted" : record.review_decision || "needs-review"}`}>{record.storage_deleted_at ? "archived" : record.review_decision?.replaceAll("_", " ") || record.quality_status}</span></td><td>{record.storage_deleted_at ? <span className="status accepted" title={record.archive_path || "Stored in the verified local archive"}>Archived locally</span> : <button className="download" disabled={!record.signed_url} onClick={() => { setSelectedReviewRecordingId(record.id); setReviewMedia(record.signed_url); }}>Watch</button>}</td><td><div className="recording-decisions"><button className={`download ${record.review_decision === "approved" ? "selected" : ""}`} disabled={Boolean(record.storage_deleted_at)} onClick={() => reviewRecording(record.id, "approved")}>Approve</button><button className={`download danger ${record.review_decision === "rejected" ? "selected" : ""}`} disabled={Boolean(record.storage_deleted_at)} onClick={() => reviewRecording(record.id, "rejected")}>Decline</button><button className={`download redo ${record.review_decision === "changes_requested" ? "selected" : ""}`} disabled={Boolean(record.storage_deleted_at)} onClick={() => reviewRecording(record.id, "changes_requested")}>Redo</button></div></td></tr>) : clips.map((clip) => { const decision = localRecordingReviews[clip.id]; return <tr key={clip.id} className={clip.id === selectedReviewRecordingId ? "active-recording-row" : ""}><td><b>{clip.promptId}</b><small>{clip.transcript}</small></td><td>{clip.language}</td><td>{prompts.find((prompt) => prompt.id === clip.promptId)?.type}</td><td>{clip.duration.toFixed(1)}s</td><td><span className={`status ${decision || clip.status}`}>{decision === "approved" ? "approved" : decision === "rejected" ? "declined" : decision === "changes_requested" ? "redo requested" : clip.status}</span></td><td><button className="download" onClick={() => { if (reviewMedia) URL.revokeObjectURL(reviewMedia); setSelectedReviewRecordingId(clip.id); setReviewMedia(URL.createObjectURL(clip.blob)); }}>Watch</button></td><td><div className="recording-decisions"><button className="download" onClick={() => reviewRecording(clip.id, "approved")}>Approve</button><button className="download danger" onClick={() => reviewRecording(clip.id, "rejected")}>Decline</button><button className="download redo" onClick={() => reviewRecording(clip.id, "changes_requested")}>Redo</button></div></td></tr>; })}</tbody></table></div>
           </div>
           <aside className="reviewer-media"><div className="reviewer-media-heading"><b>Video preview</b><small>{selectedReviewRecording ? `${selectedReviewRecording.prompt_id} | ${selectedReviewRecording.language}` : "Select Watch beside any recording"}</small></div>{reviewMedia ? <video src={reviewMedia} controls autoPlay playsInline /> : <div className="reviewer-media-empty">No video selected</div>}{selectedReviewRecording && <div className="expected-script"><span>Expected script</span><p>{selectedReviewRecording.original_transcript || selectedExpectedPrompt?.text || "No expected script was saved for this recording."}</p>{selectedExpectedPrompt?.translation && <><span>English translation</span><p>{selectedExpectedPrompt.translation}</p></>}<small>Compare the spoken audio and visible lip movement with this assigned text before choosing Approve, Decline, or Redo.</small>{selectedReviewRecording.review_comment && !recordingReviewDraft && <div className="saved-clip-comment"><b>Saved reviewer comment</b><p>{selectedReviewRecording.review_comment}</p></div>}</div>}{recordingReviewDraft && <div className="clip-comment-editor"><b>{recordingReviewDraft.decision === "rejected" ? "Why is this video declined?" : "What should the participant improve?"}</b><small>This comment is saved with this video and shown to the participant if it is returned.</small><textarea autoFocus value={recordingReviewDraft.comments} onChange={(event) => setRecordingReviewDraft({ ...recordingReviewDraft, comments: event.target.value })} placeholder="For example: The lips moved out of frame. Please keep your mouth centred and repeat the full sentence." /><div><button className="download" onClick={() => setRecordingReviewDraft(null)}>Cancel</button><button className="primary" disabled={recordingReviewDraft.comments.trim().length < 10} onClick={() => reviewRecording(recordingReviewDraft.recordingId, recordingReviewDraft.decision, recordingReviewDraft.comments)}>Save {recordingReviewDraft.decision === "rejected" ? "decline" : "redo request"}</button></div></div>}</aside>
@@ -2139,6 +2186,13 @@ export default function Home() {
         </section>
       )}
 
+      {bulkReviewDraft && <aside className="review-side-dialog" aria-label="Comment for all recording decisions">
+        <div><small>Bulk review comment</small><button aria-label="Close bulk review comment" onClick={() => setBulkReviewDraft(null)}>×</button></div>
+        <h3>{bulkReviewDraft.decision === "rejected" ? "Decline all recordings" : "Request redo for all recordings"}</h3>
+        <p>Explain the shared problem once. This comment will be saved against every recording and shown to the participant when returned.</p>
+        <textarea autoFocus value={bulkReviewDraft.comments} onChange={(event) => setBulkReviewDraft({ ...bulkReviewDraft, comments: event.target.value })} placeholder="For example: Background noise makes every recording difficult to understand. Please record all prompts again in a quiet room." />
+        <div className="review-side-dialog-actions"><button className="secondary" onClick={() => setBulkReviewDraft(null)}>Cancel</button><button className="primary" disabled={bulkReviewDraft.comments.trim().length < 10} onClick={() => void reviewAllRecordings(bulkReviewDraft.decision, bulkReviewDraft.comments)}>Apply to all</button></div>
+      </aside>}
       {toast && <div className="toast">✓ {toast}</div>}
       <footer><span>NaijaVision Research Infrastructure</span><span>Open multilingual contribution platform</span></footer>
     </main>

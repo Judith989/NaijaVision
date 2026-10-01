@@ -76,3 +76,27 @@ test("participants can correct language selection before recording and are warne
   assert.match(dashboard, /Update language selection/);
   assert.match(dashboard, /survey=edit/);
 });
+
+test("reviewers can decide recordings in bulk without premature or duplicate earnings", async () => {
+  const [contribution, paymentGuard] = await Promise.all([
+    read("src/app/page.tsx"),
+    read("supabase/migrations/202610010001_reviewer_payment_after_final_approval.sql"),
+  ]);
+  assert.match(contribution, /reviewAllRecordings/);
+  assert.match(contribution, /Approve all/);
+  assert.match(contribution, /Decline all/);
+  assert.match(contribution, /Redo all/);
+  assert.match(contribution, /review-side-dialog/);
+  assert.match(paymentGuard, /new\.recommendation <> 'approved'/);
+  assert.match(paymentGuard, /new\.admin_review_status <> 'accepted'/);
+  assert.match(paymentGuard, /count\(distinct r\.prompt_assignment_id\)/);
+  assert.match(paymentGuard, /set status = 'cancelled'/);
+});
+
+test("participant forms distinguish required and optional information", async () => {
+  const contribution = await read("src/app/page.tsx");
+  assert.match(contribution, /required-badge/);
+  assert.match(contribution, /Camera resolution <small>optional · only if known<\/small>/);
+  assert.match(contribution, /Device brand <small>optional<\/small>/);
+  assert.doesNotMatch(contribution.match(/const requiredAnswers = \[[\s\S]*?\];/)?.[0] || "", /cameraResolution|deviceBrand/);
+});
