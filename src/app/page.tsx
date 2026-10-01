@@ -345,34 +345,28 @@ export default function Home() {
           .select("country,bank_code,bank_name,account_name,account_last4,verified_at")
           .eq("user_id", data.user.id)
           .maybeSingle();
-        if (editingSurvey) {
-          if (savedPayout?.verified_at) {
-            setAccount((current) => ({
-              ...current,
-              payoutCountry: savedPayout.country,
-              bankCode: savedPayout.bank_code,
-              bankName: savedPayout.bank_name,
-              accountName: savedPayout.account_name,
-              accountNumber: savedPayout.account_last4,
-            }));
-            setBankVerified(true);
-          }
-          if (activeSubmission && Number(activeSubmission.accepted_recordings || 0) > 0) {
-            setToast("Language selection is locked after recording begins. Contact support if a correction is necessary.");
-            openCalibration("record");
-          } else {
-            setStep(savedConsent ? "profile" : "study");
-          }
-        } else if (savedPayout?.verified_at && requestedMode.get("payment") !== "edit") {
+        if (savedPayout) {
+          setSavedAccountLast4(savedPayout.account_last4);
           setAccount((current) => ({
             ...current,
             payoutCountry: savedPayout.country,
             bankCode: savedPayout.bank_code,
             bankName: savedPayout.bank_name,
             accountName: savedPayout.account_name,
-            accountNumber: savedPayout.account_last4,
+            accountNumber: savedPayout.verified_at ? savedPayout.account_last4 : "",
           }));
-          setBankVerified(true);
+          setBankVerified(Boolean(savedPayout.verified_at));
+        }
+        if (editingPayment) {
+          setStep("account");
+        } else if (editingSurvey) {
+          if (activeSubmission && Number(activeSubmission.accepted_recordings || 0) > 0) {
+            setToast("Language selection is locked after recording begins. Contact support if a correction is necessary.");
+            openCalibration("record");
+          } else {
+            setStep(savedConsent ? "profile" : "study");
+          }
+        } else {
           if (activeSubmission) openCalibration("record");
           else if (latestSubmission && ["paid", "rejected", "withdrawn"].includes(latestSubmission.status) && savedResponses && savedConsent) {
             const { data: newSubmissionId, error: startError } = await supabase.rpc("start_next_submission");
@@ -388,20 +382,6 @@ export default function Home() {
               openCalibration("record");
             }
           } else setStep("study");
-        } else {
-          if (savedPayout) {
-            setSavedAccountLast4(savedPayout.account_last4);
-            setAccount((current) => ({
-              ...current,
-              payoutCountry: savedPayout.country,
-              bankCode: savedPayout.bank_code,
-              bankName: savedPayout.bank_name,
-              accountName: savedPayout.account_name,
-              accountNumber: "",
-            }));
-          }
-          setBankVerified(false);
-          setStep("account");
         }
       }
       if (requestedMode.get("admin") === "1" && role === "admin") {
@@ -956,6 +936,11 @@ export default function Home() {
       router.push(`${BASE_PATH}/dashboard`);
       return;
     }
+    setStep("study");
+  }
+
+  function continueWithoutPayout() {
+    setAuthMessage("");
     setStep("study");
   }
 
@@ -1871,7 +1856,7 @@ export default function Home() {
 
       {step === "account" && (
         <section className="shell narrow">
-          <div className="section-head"><div><div className="eyebrow">{paymentEditMode ? "Payment settings" : "Participant account"}</div><h2>{paymentEditMode ? "Update payment details." : "Create your contribution record."}</h2><p>{paymentEditMode ? "Verify a replacement Nigerian bank account for future approved compensation." : "Use a contact method you can verify and bank details that can receive your compensation after approval."}</p></div></div>
+          <div className="section-head"><div><div className="eyebrow">{paymentEditMode ? "Payment settings" : "Participant account"}</div><h2>{paymentEditMode ? "Update payment details." : "Add payment details."}</h2><p>{paymentEditMode ? "Verify a replacement Nigerian bank account for future approved compensation." : "Bank verification is not required to begin recording. Add it now or return from your dashboard before payment."}</p></div></div>
           {paymentEditMode && savedAccountLast4 && <div className="notice"><Mark>i</Mark><p>Your current verified payment account ends in <b>{savedAccountLast4}</b>. Enter the full 10-digit number below only when replacing it.</p></div>}
           <div className="form-grid">
             <label><span>Contact method</span><select value={account.contactMethod} onChange={(e) => setAccount({ ...account, contactMethod: e.target.value })}><option>Email</option><option>Phone number</option></select></label>
@@ -1882,9 +1867,9 @@ export default function Home() {
             <label className="wide"><span>10-digit account number</span><div className="inline-verify"><input inputMode="numeric" maxLength={10} value={account.accountNumber} onChange={(e) => { setAccount({ ...account, accountNumber: e.target.value.replace(/\D/g, "").slice(0, 10), accountName: "" }); setBankVerified(false); }} placeholder="Enter 10 digits" /><button className="secondary" type="button" disabled={verifyingBank || !account.bankCode || account.accountNumber.length !== 10} onClick={verifyPayoutAccount}>{verifyingBank ? "Verifying..." : "Verify account"}</button></div></label>
             {authRequested && !authVerified && <label className="wide"><span>Verification code</span><div className="inline-verify"><input inputMode="numeric" value={authCode} onChange={(e) => setAuthCode(e.target.value)} placeholder="Enter the code you received" /><button className="secondary" type="button" onClick={verifyAccountCode}>Verify</button></div></label>}
           </div>
-          <div className="notice"><Mark>i</Mark><p>Compensation becomes payable after a reviewer approves the completed submission. Make sure the account details are correct.</p></div>
+          <div className="notice"><Mark>i</Mark><p>Compensation becomes payable after approval, but it cannot be paid until a Nigerian bank account has been verified. You can record and submit before completing this step.</p></div>
           {authMessage && <p className="auth-message">{authMessage}</p>}
-          <div className="footer-actions"><button className="secondary" onClick={() => paymentEditMode ? router.push(`${BASE_PATH}/dashboard`) : setStep("welcome")}>{paymentEditMode ? "Cancel" : "Back"}</button>{authVerified ? <button className="primary" disabled={!bankVerified} onClick={savePayoutAndContinue}>{paymentEditMode ? "Save verified payment details" : "Continue with verified account"} <span>→</span></button> : <button className="primary" disabled={!account.contact.trim()} onClick={requestAccountVerification}>Verify contact <span>→</span></button>}</div>
+          <div className="footer-actions"><button className="secondary" onClick={() => paymentEditMode ? router.push(`${BASE_PATH}/dashboard`) : setStep("welcome")}>{paymentEditMode ? "Cancel" : "Back"}</button>{authVerified && !paymentEditMode && !bankVerified && <button className="secondary" onClick={continueWithoutPayout}>Continue and add payment details later</button>}{authVerified ? <button className="primary" disabled={!bankVerified} onClick={savePayoutAndContinue}>{paymentEditMode ? "Save verified payment details" : "Continue with verified account"} <span>→</span></button> : <button className="primary" disabled={!account.contact.trim()} onClick={requestAccountVerification}>Verify contact <span>→</span></button>}</div>
         </section>
       )}
 

@@ -100,3 +100,18 @@ test("participant forms distinguish required and optional information", async ()
   assert.match(contribution, /Device brand <small>optional<\/small>/);
   assert.doesNotMatch(contribution.match(/const requiredAnswers = \[[\s\S]*?\];/)?.[0] || "", /cameraResolution|deviceBrand/);
 });
+
+test("recording can begin without bank verification while payment remains protected", async () => {
+  const [contribution, deferredPayout, paymentClaim] = await Promise.all([
+    read("src/app/page.tsx"),
+    read("supabase/migrations/202610010002_defer_payout_until_payment.sql"),
+    read("supabase/migrations/202609150001_atomic_payment_processing.sql"),
+  ]);
+  assert.match(contribution, /Bank verification is not required to begin recording/);
+  assert.match(contribution, /Continue and add payment details later/);
+  assert.match(deferredPayout, /alter column payout_account_id drop not null/);
+  assert.match(deferredPayout, /attach_verified_payout_to_pending_payments/);
+  assert.doesNotMatch(deferredPayout, /A verified payout account is required/);
+  assert.match(paymentClaim, /verified_at is not null/);
+  assert.match(paymentClaim, /Verified payout recipient is unavailable/);
+});
