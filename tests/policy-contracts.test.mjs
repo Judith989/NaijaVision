@@ -72,6 +72,9 @@ test("participants can correct language selection before recording and are warne
   assert.match(contribution, /if \(editingSurvey\) \{/);
   assert.match(contribution, /setStep\(savedConsent \? "profile" : "study"\)/);
   assert.match(contribution, /Language selection is locked after recording begins/);
+  assert.match(contribution, /Select at least one native language, your primary language, and at least one language used daily/);
+  assert.match(contribution, /No languages selected yet/);
+  assert.doesNotMatch(contribution, /<label className="wide"><span>Native languages/);
   assert.match(dashboard, /No languages are selected/);
   assert.match(dashboard, /Update language selection/);
   assert.match(dashboard, /survey=edit/);

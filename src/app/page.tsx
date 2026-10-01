@@ -972,7 +972,11 @@ export default function Home() {
       profile.lighting,
       profile.internet,
     ];
-    if (requiredAnswers.some((answer) => !answer) || !profile.nativeLanguages.length || !profile.dailyLanguages.length || !profile.accessibility.length || (profile.country === "Nigeria" && !profile.lga) || (profile.country === "Other" && !profile.otherCountry.trim())) {
+    if (!profile.nativeLanguages.length || !profile.primary || !profile.dailyLanguages.length) {
+      setToast("Select at least one native language, your primary language, and at least one language used daily.");
+      return;
+    }
+    if (requiredAnswers.some((answer) => !answer) || !profile.accessibility.length || (profile.country === "Nigeria" && !profile.lga) || (profile.country === "Other" && !profile.otherCountry.trim())) {
       setToast("Please answer every required survey question. Optional fields may be left blank.");
       return;
     }
@@ -1940,13 +1944,14 @@ export default function Home() {
           </div></div>
 
           <div className="survey-section"><h3><span>C</span> Language background and code-switching</h3><div className="form-grid">
-            <label className="wide"><span>Native languages <small>required · select multiple</small></span><MultiSelect options={languages} value={profile.nativeLanguages} onChange={(value) => setProfile({ ...profile, nativeLanguages: value })} /></label>
-            <label className="wide"><span>Other languages spoken <small>optional · select multiple</small></span><MultiSelect options={languages} value={profile.otherLanguages} onChange={(value) => setProfile({ ...profile, otherLanguages: value })} /></label>
+            <div className="form-field wide"><span>Native languages <small>required · select one or more</small></span><MultiSelect options={languages} value={profile.nativeLanguages} onChange={(value) => setProfile({ ...profile, nativeLanguages: value })} /></div>
+            <div className="form-field wide"><span>Other languages spoken <small>optional · select one or more</small></span><MultiSelect options={languages} value={profile.otherLanguages} onChange={(value) => setProfile({ ...profile, otherLanguages: value })} /></div>
             <label><span>Primary language</span><select value={profile.primary} onChange={(e) => setProfile({ ...profile, primary: e.target.value })}><option value="">Select language</option>{languages.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label><span>Dialect or accent <small>optional</small></span><input value={profile.dialect} onChange={(e) => setProfile({ ...profile, dialect: e.target.value })} placeholder="e.g. Owerri Igbo" /></label>
             <label><span>Primary language used at home</span><select value={profile.homeLanguage} onChange={(e) => setProfile({ ...profile, homeLanguage: e.target.value })}><option value="">Select language</option>{languages.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label><span>Primary language used at work or school</span><select value={profile.workLanguage} onChange={(e) => setProfile({ ...profile, workLanguage: e.target.value })}><option value="">Select language</option>{languages.map((item) => <option key={item}>{item}</option>)}</select></label>
-            <label className="wide"><span>Languages used daily <small>required · select multiple</small></span><MultiSelect options={languages} value={profile.dailyLanguages} onChange={(value) => setProfile({ ...profile, dailyLanguages: value })} /></label>
+            <div className="form-field wide"><span>Languages used daily <small>required · select one or more</small></span><MultiSelect options={languages} value={profile.dailyLanguages} onChange={(value) => setProfile({ ...profile, dailyLanguages: value })} /></div>
+            <div className="language-selection-summary wide" role="status"><b>{selectedLanguages.size ? `${selectedLanguages.size} language${selectedLanguages.size === 1 ? "" : "s"} selected` : "No languages selected yet"}</b><span>{selectedLanguages.size ? Array.from(selectedLanguages).join(", ") : "Choose the language chips above and complete the primary, home, work or school, and daily-language fields."}</span></div>
             <label><span>Can you read your primary language?</span><select value={profile.canRead} onChange={(e) => setProfile({ ...profile, canRead: e.target.value })}><option value="">Select an answer</option><option>Yes</option><option>No</option><option>Partially</option></select></label>
             <label><span>Can you write your primary language?</span><select value={profile.canWrite} onChange={(e) => setProfile({ ...profile, canWrite: e.target.value })}><option value="">Select an answer</option><option>Yes</option><option>No</option><option>Partially</option></select></label>
             <label><span>How often do you switch languages?</span><select value={profile.switchingFrequency} onChange={(e) => setProfile({ ...profile, switchingFrequency: e.target.value })}><option value="">Select frequency</option>{["Never","Rarely","Sometimes","Frequently","Always"].map((item) => <option key={item}>{item}</option>)}</select></label>
@@ -1959,7 +1964,7 @@ export default function Home() {
             <label><span>Hearing impairment</span><select value={profile.hearingImpairment} onChange={(e) => setProfile({ ...profile, hearingImpairment: e.target.value })}><option value="">Select an answer</option><option>No</option><option>Yes</option></select></label>
             <label><span>Normally wear glasses?</span><select value={profile.glasses} onChange={(e) => setProfile({ ...profile, glasses: e.target.value })}><option value="">Select an answer</option><option>Yes</option><option>No</option></select></label>
             <label><span>Face covering while speaking</span><select value={profile.faceCovering} onChange={(e) => setProfile({ ...profile, faceCovering: e.target.value })}><option value="">Select frequency</option><option>Frequently</option><option>Occasionally</option><option>Never</option></select></label>
-            <label className="wide"><span>Accessibility tools <small>required · select at least one, including None</small></span><MultiSelect options={accessibilityOptions} value={profile.accessibility} onChange={(value) => setProfile({ ...profile, accessibility: value })} /></label>
+            <div className="form-field wide"><span>Accessibility tools <small>required · select at least one, including None</small></span><MultiSelect options={accessibilityOptions} value={profile.accessibility} onChange={(value) => setProfile({ ...profile, accessibility: value })} /></div>
           </div></div>
 
           <div className="survey-section"><h3><span>E</span> Device and recording environment</h3><div className="form-grid">
