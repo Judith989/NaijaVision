@@ -67,6 +67,8 @@ test("participants can correct language selection before recording and are warne
     read("src/app/dashboard/page.tsx"),
   ]);
   assert.match(contribution, /requestedMode\.get\("survey"\) === "edit"/);
+  assert.match(contribution, /if \(editingSurvey\) \{/);
+  assert.match(contribution, /setStep\(savedConsent \? "profile" : "study"\)/);
   assert.match(contribution, /Language selection is locked after recording begins/);
   assert.match(dashboard, /No languages are selected/);
   assert.match(dashboard, /Update language selection/);
