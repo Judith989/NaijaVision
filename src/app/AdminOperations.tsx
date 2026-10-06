@@ -6,10 +6,10 @@ import { backendConfigured, getSupabase } from "./lib/supabase";
 import { surveyLanguages } from "./lib/surveyLanguages";
 import { recordedCategories, type CategoryRecording } from "./lib/recordedCategories";
 
-type Row = Record<string, unknown>;
+type Row = Record<string, string | number | boolean | null | undefined>;
 
 function related(row: Row, key: string): Row {
-  const value = row[key];
+  const value: unknown = row[key];
   return (Array.isArray(value) ? value[0] : value || {}) as Row;
 }
 
@@ -94,8 +94,8 @@ export function AdminOperations({ assignmentsOnly = false }: { assignmentsOnly?:
     ]);
     setWithdrawals(withdrawalResult.data || []);
     setRisks(riskResult.data || []);
-    setPayments(paymentResult.data || []);
-    setReviewerPayments(reviewerPaymentResult.data || []);
+    setPayments((paymentResult.data || []) as unknown as Row[]);
+    setReviewerPayments((reviewerPaymentResult.data || []) as unknown as Row[]);
     setReviewerPolicy(reviewerPolicyResult.data || null);
     if (reviewerPolicyResult.data) {
       setReviewerAmount(String(reviewerPolicyResult.data.amount_per_video));
@@ -104,7 +104,7 @@ export function AdminOperations({ assignmentsOnly = false }: { assignmentsOnly?:
     setAudit(auditResult.data || []);
     setReleases(releaseResult.data || []);
     setStaffMembers(await withSelectedLanguages(staffMemberResult.data || []));
-    setPendingSubmissions(submissionResult.data || []);
+    setPendingSubmissions((submissionResult.data || []) as unknown as Row[]);
     setActivePolicy(policyResult.data || null);
     setPendingAccounts(pendingAccountResult.data || []);
     setAccountDirectory(accountDirectoryResult.data || []);
