@@ -62,9 +62,26 @@ Deno.serve(async (request) => {
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
     if (error) return json({ error: error.message }, 500);
-    // A provider-verified token supersedes any sensitive manual fallback request.
-    // Ignore missing-table errors during staggered deployments; the verified payout remains valid.
-    await service.from("manual_payout_details").delete().eq("user_id", user.id);
+    // Keep the full number in the separately protected admin-only table. Supabase
+    // clients cannot read this table directly; only the authorization-checking
+    // account-directory RPC can return it to an administrator. This also lets
+    // finance staff complete a manual transfer when the provider token cannot
+    // be used, without exposing the number on participant or reviewer screens.
+    const { error: protectedDetailsError } = await service.from("manual_payout_details").upsert({
+      user_id: user.id,
+      country: input.country,
+      bank_code: bankCode,
+      bank_name: input.bankName,
+      account_name: resolvedName,
+      account_number: accountNumber,
+      status: "verified",
+      rejection_reason: null,
+      submitted_at: new Date().toISOString(),
+      reviewed_at: new Date().toISOString(),
+      reviewed_by: null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+    if (protectedDetailsError) return json({ error: protectedDetailsError.message }, 500);
     const { data: sharedAccounts } = await service.from("payout_accounts")
       .select("user_id")
       .eq("provider_recipient_code", recipientCode)
