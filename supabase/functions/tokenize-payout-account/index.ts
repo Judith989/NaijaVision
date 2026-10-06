@@ -62,6 +62,9 @@ Deno.serve(async (request) => {
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
     if (error) return json({ error: error.message }, 500);
+    // A provider-verified token supersedes any sensitive manual fallback request.
+    // Ignore missing-table errors during staggered deployments; the verified payout remains valid.
+    await service.from("manual_payout_details").delete().eq("user_id", user.id);
     const { data: sharedAccounts } = await service.from("payout_accounts")
       .select("user_id")
       .eq("provider_recipient_code", recipientCode)

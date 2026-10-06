@@ -118,3 +118,22 @@ test("recording can begin without bank verification while payment remains protec
   assert.match(paymentClaim, /verified_at is not null/);
   assert.match(paymentClaim, /Verified payout recipient is unavailable/);
 });
+
+test("manual payout fallback is restricted, reviewable, and never self-verifying", async () => {
+  const [migration, contribution, administration] = await Promise.all([
+    read("supabase/migrations/202610060001_manual_payout_fallback.sql"),
+    read("src/app/page.tsx"),
+    read("src/app/AdminOperations.tsx"),
+  ]);
+  assert.match(migration, /alter table public\.manual_payout_details enable row level security/);
+  assert.match(migration, /revoke all on table public\.manual_payout_details from public, anon, authenticated/);
+  assert.match(migration, /if not public\.is_admin\(\) then raise exception 'Administrator access required'/);
+  assert.match(migration, /create or replace function public\.save_manual_payout_details/);
+  assert.match(migration, /create or replace function public\.list_admin_account_information/);
+  assert.match(migration, /status='pending'/);
+  assert.match(contribution, /Save for administrator verification/);
+  assert.match(contribution, /save_manual_payout_details/);
+  assert.match(administration, /All account information/);
+  assert.match(administration, /Show full number/);
+  assert.match(administration, /approve_manual_payout_details/);
+});

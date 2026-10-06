@@ -183,6 +183,8 @@ export default function Home() {
   const [nigerianBanks, setNigerianBanks] = useState(fallbackNigerianBanks);
   const [bankVerified, setBankVerified] = useState(false);
   const [verifyingBank, setVerifyingBank] = useState(false);
+  const [manualEntryMode, setManualEntryMode] = useState(false);
+  const [savingManualPayout, setSavingManualPayout] = useState(false);
   const [paymentEditMode, setPaymentEditMode] = useState(false);
   const [savedAccountLast4, setSavedAccountLast4] = useState("");
   const [authenticatedUserId, setAuthenticatedUserId] = useState("");
@@ -918,13 +920,40 @@ export default function Home() {
     setVerifyingBank(false);
     if (error || data?.error) {
       setBankVerified(false);
+      setManualEntryMode(true);
       const message = data?.error || await edgeFunctionErrorMessage(error, "Verification failed.");
-      setAuthMessage(`Bank details could not be verified: ${message}`);
+      setAuthMessage(`Automatic verification is unavailable: ${message} Enter the account name and save the details for administrator review, or continue recording and return later.`);
       return;
     }
     setAccount((current) => ({ ...current, accountName: data.accountName || current.accountName }));
     setBankVerified(true);
+    setManualEntryMode(false);
     setAuthMessage(`Verified account: ${data.accountName || "Account confirmed"}.`);
+  }
+
+  async function saveManualPayoutDetails() {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    if (!account.bankCode || account.accountNumber.length !== 10 || account.accountName.trim().length < 2) {
+      setAuthMessage("Select the bank, enter the 10-digit account number, and enter the account name.");
+      return;
+    }
+    setSavingManualPayout(true);
+    const { error } = await supabase.rpc("save_manual_payout_details", {
+      p_country: account.payoutCountry,
+      p_bank_code: account.bankCode,
+      p_bank_name: account.bankName,
+      p_account_name: account.accountName.trim(),
+      p_account_number: account.accountNumber,
+    });
+    setSavingManualPayout(false);
+    if (error) {
+      setAuthMessage(`Manual payment details could not be saved: ${error.message}`);
+      return;
+    }
+    setSavedAccountLast4(account.accountNumber.slice(-4));
+    setAuthMessage("Payment details saved for administrator verification. You can continue recording, but payment will remain unavailable until an administrator approves them.");
+    window.setTimeout(() => paymentEditMode ? router.push(`${BASE_PATH}/dashboard`) : setStep("study"), 700);
   }
 
   async function savePayoutAndContinue() {
@@ -1867,13 +1896,13 @@ export default function Home() {
             <label><span>{account.contactMethod}</span><input value={account.contact} onChange={(e) => setAccount({ ...account, contact: e.target.value })} placeholder={account.contactMethod === "Email" ? "name@example.com" : "+234..."} /></label>
             <label><span>Bank country</span><select value={account.payoutCountry} onChange={(e) => setAccount({ ...account, payoutCountry: e.target.value })}>{countries.map((country) => <option key={country}>{country}</option>)}</select></label>
             <label><span>Bank name</span><select value={account.bankCode} onChange={(e) => { const bank = nigerianBanks.find((item) => item.code === e.target.value); setAccount({ ...account, bankCode: e.target.value, bankName: bank?.name || "", accountName: "" }); setBankVerified(false); }}><option value="">Select your bank</option>{nigerianBanks.map((bank) => <option key={bank.code} value={bank.code}>{bank.name}</option>)}</select></label>
-            <label><span>Account name</span><input value={account.accountName} readOnly placeholder="Shown after verification" /></label>
+            <label><span>Account name</span><input value={account.accountName} readOnly={!manualEntryMode || bankVerified} onChange={(e) => setAccount({ ...account, accountName: e.target.value })} placeholder={manualEntryMode ? "Enter the name on the bank account" : "Shown after verification"} /></label>
             <label className="wide"><span>10-digit account number</span><div className="inline-verify"><input inputMode="numeric" maxLength={10} value={account.accountNumber} onChange={(e) => { setAccount({ ...account, accountNumber: e.target.value.replace(/\D/g, "").slice(0, 10), accountName: "" }); setBankVerified(false); }} placeholder="Enter 10 digits" /><button className="secondary" type="button" disabled={verifyingBank || !account.bankCode || account.accountNumber.length !== 10} onClick={verifyPayoutAccount}>{verifyingBank ? "Verifying..." : "Verify account"}</button></div></label>
             {authRequested && !authVerified && <label className="wide"><span>Verification code</span><div className="inline-verify"><input inputMode="numeric" value={authCode} onChange={(e) => setAuthCode(e.target.value)} placeholder="Enter the code you received" /><button className="secondary" type="button" onClick={verifyAccountCode}>Verify</button></div></label>}
           </div>
           <div className="notice"><Mark>i</Mark><p>Compensation becomes payable after approval, but it cannot be paid until a Nigerian bank account has been verified. You can record and submit before completing this step.</p></div>
           {authMessage && <p className="auth-message">{authMessage}</p>}
-          <div className="footer-actions"><button className="secondary" onClick={() => paymentEditMode ? router.push(`${BASE_PATH}/dashboard`) : setStep("welcome")}>{paymentEditMode ? "Cancel" : "Back"}</button>{authVerified && !paymentEditMode && !bankVerified && <button className="secondary" onClick={continueWithoutPayout}>Continue and add payment details later</button>}{authVerified ? <button className="primary" disabled={!bankVerified} onClick={savePayoutAndContinue}>{paymentEditMode ? "Save verified payment details" : "Continue with verified account"} <span>→</span></button> : <button className="primary" disabled={!account.contact.trim()} onClick={requestAccountVerification}>Verify contact <span>→</span></button>}</div>
+          <div className="footer-actions"><button className="secondary" onClick={() => paymentEditMode ? router.push(`${BASE_PATH}/dashboard`) : setStep("welcome")}>{paymentEditMode ? "Cancel" : "Back"}</button>{authVerified && !bankVerified && <button className="secondary" type="button" onClick={() => { setManualEntryMode(true); setAuthMessage("Enter the account name exactly as it appears on the bank account, then save it for administrator verification."); }}>Enter details manually</button>}{authVerified && manualEntryMode && !bankVerified && <button className="primary" disabled={savingManualPayout || !account.bankCode || account.accountNumber.length !== 10 || account.accountName.trim().length < 2} onClick={saveManualPayoutDetails}>{savingManualPayout ? "Saving..." : "Save for administrator verification"}</button>}{authVerified && !paymentEditMode && !bankVerified && <button className="secondary" onClick={continueWithoutPayout}>Continue and add payment details later</button>}{authVerified && bankVerified ? <button className="primary" onClick={savePayoutAndContinue}>{paymentEditMode ? "Save verified payment details" : "Continue with verified account"} <span>→</span></button> : !authVerified ? <button className="primary" disabled={!account.contact.trim()} onClick={requestAccountVerification}>Verify contact <span>→</span></button> : null}</div>
         </section>
       )}
 

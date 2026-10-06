@@ -62,6 +62,9 @@ export function AdminOperations({ assignmentsOnly = false }: { assignmentsOnly?:
   const [participantQuery, setParticipantQuery] = useState("");
   const [participants, setParticipants] = useState<Row[]>([]);
   const [pendingAccounts, setPendingAccounts] = useState<Row[]>([]);
+  const [accountDirectory, setAccountDirectory] = useState<Row[]>([]);
+  const [accountDirectoryQuery, setAccountDirectoryQuery] = useState("");
+  const [revealedAccounts, setRevealedAccounts] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState("");
 
   async function refresh() {
@@ -69,7 +72,7 @@ export function AdminOperations({ assignmentsOnly = false }: { assignmentsOnly?:
     if (!supabase) return;
     setAssignmentsLoading(true);
     setAssignmentError("");
-    const [withdrawalResult, riskResult, paymentResult, reviewerPaymentResult, reviewerPolicyResult, auditResult, releaseResult, staffMemberResult, submissionResult, policyResult, pendingAccountResult] = await Promise.all([
+    const [withdrawalResult, riskResult, paymentResult, reviewerPaymentResult, reviewerPolicyResult, auditResult, releaseResult, staffMemberResult, submissionResult, policyResult, pendingAccountResult, accountDirectoryResult] = await Promise.all([
       supabase.from("withdrawal_requests").select("*").in("status", ["requested", "processing"]).order("requested_at"),
       supabase.from("risk_flags").select("*").eq("status", "open").order("score", { ascending: false }),
       supabase.from("payments").select("id,submission_id,user_id,amount,currency,status,provider_transaction_reference,created_at,payout_accounts(bank_name,account_name,account_last4),submissions(participant_id)").in("status", ["eligible", "processing", "failed"]).order("created_at"),
@@ -81,6 +84,7 @@ export function AdminOperations({ assignmentsOnly = false }: { assignmentsOnly?:
       supabase.from("submissions").select("id,user_id,participant_id,status,expected_recordings,assigned_reviewer_id,created_at,recordings(language,prompt_assignments(prompt_id))").in("status", ["automated_qc", "awaiting_review", "resubmitted"]).order("created_at"),
       supabase.from("compensation_policies").select("id,amount,currency,pricing_basis,effective_at").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle(),
       supabase.rpc("list_verified_pending_accounts"),
+      supabase.rpc("list_admin_account_information"),
     ]);
     setWithdrawals(withdrawalResult.data || []);
     setRisks(riskResult.data || []);
@@ -97,6 +101,7 @@ export function AdminOperations({ assignmentsOnly = false }: { assignmentsOnly?:
     setPendingSubmissions(submissionResult.data || []);
     setActivePolicy(policyResult.data || null);
     setPendingAccounts(pendingAccountResult.data || []);
+    setAccountDirectory(accountDirectoryResult.data || []);
     setAssignmentError(submissionResult.error?.message || staffMemberResult.error?.message || "");
     setAssignmentsLoading(false);
   }
@@ -216,6 +221,24 @@ export function AdminOperations({ assignmentsOnly = false }: { assignmentsOnly?:
     if (!error) refresh();
   }
 
+  async function decideManualPayout(userId: string, approve: boolean) {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    if (approve) {
+      if (!window.confirm("Approve these manually submitted bank details? Confirm the account number and account name independently before approval.")) return;
+      const { error } = await supabase.rpc("approve_manual_payout_details", { p_user_id: userId });
+      setMessage(error ? error.message : "Manual payment details approved.");
+      if (!error) refresh();
+      return;
+    }
+    const reason = window.prompt("Explain what the account holder must correct.");
+    if (reason === null) return;
+    if (reason.trim().length < 3) { setMessage("Enter a reason before rejecting the payment details."); return; }
+    const { error } = await supabase.rpc("reject_manual_payout_details", { p_user_id: userId, p_reason: reason.trim() });
+    setMessage(error ? error.message : "Manual payment details returned for correction.");
+    if (!error) refresh();
+  }
+
   async function completeWithdrawal(id: string, submissionId: string) {
     const supabase = getSupabase();
     const now = new Date().toISOString();
@@ -283,6 +306,12 @@ export function AdminOperations({ assignmentsOnly = false }: { assignmentsOnly?:
   const savedReviewerRate = Number(reviewerPolicy?.amount_per_video ?? 0);
   const savedReviewerCurrency = String(reviewerPolicy?.currency ?? "NGN");
   const reviewerCurrencyPrefix = savedReviewerCurrency === "NGN" ? "₦" : `${savedReviewerCurrency} `;
+  const filteredAccountDirectory = accountDirectory.filter((row) => {
+    const term = accountDirectoryQuery.trim().toLowerCase();
+    if (!term) return true;
+    return [row.display_name, row.participant_id, row.email, row.phone, row.bank_name, row.account_name]
+      .some((value) => String(value || "").toLowerCase().includes(term));
+  });
 
   const assignmentPanel = <section className="ops-card wide-ops-card" aria-labelledby="assignment-heading">
     <div className="section-head"><div><h3 id="assignment-heading">Assign reviewers</h3><p className="ops-hint">Choose a reviewer whose selected languages match the recorded categories, then select Assign reviewer.</p></div><button onClick={() => void refresh()} disabled={assignmentsLoading}>Refresh</button></div>
@@ -309,6 +338,7 @@ export function AdminOperations({ assignmentsOnly = false }: { assignmentsOnly?:
     <div className="metric-grid"><div><span>Account requests</span><b>{pendingAccounts.length}</b><small>New accounts awaiting approval</small></div><div><span>Pending reviews</span><b>{pendingSubmissions.length}</b><small>Submissions requiring assignment or action</small></div><div><span>Reviewers</span><b>{staffMembers.filter((member) => member.role === "reviewer").length}</b><small>Active reviewer accounts</small></div><div><span>Participant payments</span><b>₦{payments.reduce((total, payment) => total + Number(payment.amount || 0), 0).toLocaleString()}</b><small>Eligible, processing, or failed</small></div><div><span>Reviewer payments</span><b>₦{reviewerPayments.reduce((total, payment) => total + Number(payment.amount || 0), 0).toLocaleString()}</b><small>Eligible, processing, or failed</small></div></div>
     <div className="ops-grid">
       <div className="ops-card wide-ops-card"><h3>Pending account requests</h3><p className="ops-hint">Approve a verified applicant before they can access consent, surveys, recordings, or staff work.</p>{pendingAccounts.length ? pendingAccounts.map((row) => <div className="ops-row" key={String(row.user_id)}><span><b>{String(row.display_name || "Unnamed")}</b> | {String(row.participant_id)}<small>Requested {new Date(String(row.created_at)).toLocaleString()}</small></span><button onClick={() => decideAccount(String(row.user_id), true)}>Approve account</button><button className="danger" onClick={() => decideAccount(String(row.user_id), false)}>Decline</button></div>) : <p>No accounts are awaiting approval.</p>}</div>
+      <div className="ops-card wide-ops-card"><h3>All account information</h3><p className="ops-hint">Restricted administrator view. Full account numbers appear only for manually submitted details. Provider-verified accounts remain masked because NaijaVision never receives their full number.</p><input value={accountDirectoryQuery} onChange={(event) => setAccountDirectoryQuery(event.target.value)} placeholder="Search name, participant ID, email, phone, or bank" />{filteredAccountDirectory.length ? filteredAccountDirectory.map((row) => { const userId = String(row.user_id); const fullNumber = String(row.account_number || ""); const visibleNumber = fullNumber ? revealedAccounts[userId] ? fullNumber : `••••••${fullNumber.slice(-4)}` : `••••${String(row.account_last4 || "----")}`; return <div className="ops-row account-directory-row" key={userId}><span><b>{String(row.display_name || "Unnamed")} | {String(row.participant_id)}</b><small>{String(row.email || "No email")} | {String(row.phone || "No phone")} | {String(row.role)} | {String(row.account_status)}</small><small>{row.bank_name ? `${String(row.bank_name)} | ${String(row.account_name || "Account name unavailable")} | ${visibleNumber}` : "No payment details supplied"}</small><small>Payment details: {String(row.payout_status)} | Source: {String(row.payout_source)}</small></span>{fullNumber && <button onClick={() => setRevealedAccounts((current) => ({ ...current, [userId]: !current[userId] }))}>{revealedAccounts[userId] ? "Hide number" : "Show full number"}</button>}{row.payout_status === "pending" && <><button onClick={() => decideManualPayout(userId, true)}>Approve details</button><button className="danger" onClick={() => decideManualPayout(userId, false)}>Return for correction</button></>}</div>; }) : <p>No accounts match this search.</p>}</div>
       <div className="ops-card"><h3>Reviewers and administrators</h3><p className="ops-hint">Reviewers assess assigned media. Administrators assign work, make final decisions, manage payments, and control releases.</p>{staffMembers.length ? staffMembers.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} | {String(row.participant_id)} | {String(row.role)}<small>Selected languages: {String(row.selectedLanguagesLabel)}</small></span>{row.role === "reviewer" ? <button onClick={() => changeStaffRole(String(row.user_id), "admin")}>Make admin</button> : <button onClick={() => changeStaffRole(String(row.user_id), "reviewer")}>Make reviewer</button>}<button onClick={() => changeStaffRole(String(row.user_id), "participant")}>Remove access</button></div>) : <p>No reviewer or administrator accounts found.</p>}</div>
       <div className="ops-card"><h3>Add a reviewer or administrator</h3><p className="ops-hint">Find an existing participant account, then grant the appropriate role.</p><input value={participantQuery} onChange={(event) => setParticipantQuery(event.target.value)} placeholder="Search by name or participant ID" /><button className="primary" onClick={searchParticipants}>Search</button>{participants.length ? participants.map((row) => <div className="ops-row" key={String(row.user_id)}><span>{String(row.display_name || "Unnamed")} | {String(row.participant_id)}<small>Selected languages: {String(row.selectedLanguagesLabel)}</small></span><button onClick={() => promoteParticipant(String(row.user_id), "reviewer")}>Make reviewer</button><button onClick={() => promoteParticipant(String(row.user_id), "admin")}>Make admin</button></div>) : <p>No participants found.</p>}</div>
       <div className="ops-card"><h3>Participant compensation policy</h3><p className="ops-hint">This rate applies separately to each completed regular language set and each completed NaijaSafeSpeech language set. Code-switched combinations do not count as extra units. Payment still requires administrator approval.</p>{activePolicy && <p><b>Current:</b> {String(activePolicy.amount)} {String(activePolicy.currency)} per completed language set</p>}<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Amount per completed language set" /><select value={currency} onChange={(event) => setCurrency(event.target.value)}><option>NGN</option><option>GHS</option><option>USD</option><option>GBP</option><option>EUR</option></select><button className="primary" onClick={createPolicy}>Replace active policy</button></div>
