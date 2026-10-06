@@ -150,3 +150,18 @@ test("only administrators can send private in-platform messages to users", async
   assert.match(administration, /send_admin_message/);
   assert.match(administration, /Message user/);
 });
+
+test("users can read, acknowledge, and securely reply to administrator messages", async () => {
+  const [migration, dashboard, administration] = await Promise.all([
+    read("supabase/migrations/202610060004_admin_message_replies.sql"),
+    read("src/app/dashboard/page.tsx"),
+    read("src/app/AdminOperations.tsx"),
+  ]);
+  assert.match(migration, /recipient_user_id=auth\.uid\(\)/);
+  assert.match(migration, /create or replace function public\.reply_to_admin_message/);
+  assert.match(migration, /if not public\.is_admin\(\)/);
+  assert.match(migration, /admin_message_reply/);
+  assert.match(dashboard, /reply_to_admin_message/);
+  assert.match(dashboard, /Mark as read/);
+  assert.match(administration, /Messages and replies/);
+});
