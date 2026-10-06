@@ -137,3 +137,16 @@ test("manual payout fallback is restricted, reviewable, and never self-verifying
   assert.match(administration, /Show full number/);
   assert.match(administration, /approve_manual_payout_details/);
 });
+
+test("only administrators can send private in-platform messages to users", async () => {
+  const [migration, administration] = await Promise.all([
+    read("supabase/migrations/202610060003_admin_user_messages.sql"),
+    read("src/app/AdminOperations.tsx"),
+  ]);
+  assert.match(migration, /create or replace function public\.send_admin_message/);
+  assert.match(migration, /if not public\.is_admin\(\)/);
+  assert.match(migration, /insert into public\.notifications/);
+  assert.match(migration, /write_audit_event/);
+  assert.match(administration, /send_admin_message/);
+  assert.match(administration, /Message user/);
+});
