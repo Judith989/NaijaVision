@@ -165,3 +165,16 @@ test("users can read, acknowledge, and securely reply to administrator messages"
   assert.match(dashboard, /Mark as read/);
   assert.match(administration, /Messages and replies/);
 });
+
+test("administrators can manually mark reviewer compensation paid once", async () => {
+  const [migration, administration] = await Promise.all([
+    read("supabase/migrations/202610090001_manual_reviewer_payment.sql"),
+    read("src/app/AdminOperations.tsx"),
+  ]);
+  assert.match(migration, /if not public\.is_admin\(\)/);
+  assert.match(migration, /status='paid'/);
+  assert.match(migration, /Reviewer compensation sent/);
+  assert.match(migration, /reviewer_payment\.manually_marked_paid/);
+  assert.match(administration, /mark_reviewer_payment_paid/);
+  assert.match(administration, /Mark paid/);
+});
