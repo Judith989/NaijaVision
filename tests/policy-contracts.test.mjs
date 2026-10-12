@@ -178,3 +178,10 @@ test("administrators can manually mark reviewer compensation paid once", async (
   assert.match(administration, /mark_reviewer_payment_paid/);
   assert.match(administration, /Mark paid/);
 });
+
+test("participants can update payment details while a submission is under review", async () => {
+  const contribution = await read("src/app/page.tsx");
+  assert.match(contribution, /!editingPayment && !editingSurvey && latestSubmission/);
+  assert.match(contribution, /if \(editingPayment\) \{\s*setStep\("account"\)/);
+  assert.match(contribution, /Update payment details\./);
+});

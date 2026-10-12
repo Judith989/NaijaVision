@@ -319,7 +319,10 @@ export default function Home() {
         const activeSubmission = latestSubmission && resumableStatuses.includes(latestSubmission.status) ? latestSubmission : null;
         if (latestSubmission) setEarnedCompensation({ amount: Number(latestSubmission.compensation_amount || 0), currency: latestSubmission.compensation_currency || "NGN", completedLanguages: Number(latestSubmission.completed_language_count || 0), standardLanguages: Number(latestSubmission.completed_standard_language_count || 0), safeSpeechLanguages: Number(latestSubmission.completed_safe_speech_language_count || 0) });
         const awaitingDecisionStatuses = ["submitted", "automated_qc", "awaiting_review", "payment_eligible", "payment_processing"];
-        if (latestSubmission && awaitingDecisionStatuses.includes(latestSubmission.status)) {
+        // Payment and survey settings must remain reachable while a completed
+        // submission is under review. Only ordinary contribution attempts are
+        // redirected to the review-status dashboard.
+        if (!editingPayment && !editingSurvey && latestSubmission && awaitingDecisionStatuses.includes(latestSubmission.status)) {
           window.location.replace(`${BASE_PATH}/dashboard#review-status`);
           return;
         }
