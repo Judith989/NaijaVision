@@ -13,12 +13,12 @@ function related(row: Row, key: string): Row {
   return (Array.isArray(value) ? value[0] : value || {}) as Row;
 }
 
-function ParticipantPaymentRow({ row, onMarkPaid }: { row: Row; onMarkPaid: (id: string) => void }) {
+function ParticipantPaymentRow({ row, onOpen }: { row: Row; onOpen: (row: Row) => void }) {
   const account = related(row, "payout_accounts");
   const submission = related(row, "submissions");
   return <div className="ops-row payment-queue-row">
     <span><b>{String(submission.participant_id || "Participant")}</b><small>{String(row.amount)} {String(row.currency)} due | {String(row.status)}</small><small>{String(account.bank_name || "Verified bank")} | {String(account.account_name || "Verified account")} | ending {String(account.account_last4 || "----")}</small></span>
-    <button onClick={() => onMarkPaid(String(row.id))}>Mark paid</button>
+    <button onClick={() => onOpen(row)}>Open payment</button>
   </div>;
 }
 
@@ -70,6 +70,10 @@ export function AdminOperations({ assignmentsOnly = false }: { assignmentsOnly?:
   const [adminMessageBody, setAdminMessageBody] = useState("");
   const [sendingAdminMessage, setSendingAdminMessage] = useState(false);
   const [adminMessageReplies, setAdminMessageReplies] = useState<Row[]>([]);
+  const [selectedPayment, setSelectedPayment] = useState<{ kind: "participant" | "reviewer"; row: Row; name: string } | null>(null);
+  const [paymentReference, setPaymentReference] = useState("");
+  const [paymentSentConfirmed, setPaymentSentConfirmed] = useState(false);
+  const [paymentSaving, setPaymentSaving] = useState(false);
   const [message, setMessage] = useState("");
 
   async function refresh() {
@@ -80,8 +84,8 @@ export function AdminOperations({ assignmentsOnly = false }: { assignmentsOnly?:
     const [withdrawalResult, riskResult, paymentResult, reviewerPaymentResult, reviewerPolicyResult, auditResult, releaseResult, staffMemberResult, submissionResult, policyResult, pendingAccountResult, accountDirectoryResult, adminMessageResult] = await Promise.all([
       supabase.from("withdrawal_requests").select("*").in("status", ["requested", "processing"]).order("requested_at"),
       supabase.from("risk_flags").select("*").eq("status", "open").order("score", { ascending: false }),
-      supabase.from("payments").select("id,submission_id,user_id,amount,currency,status,provider_transaction_reference,created_at,payout_accounts(bank_name,account_name,account_last4),submissions(participant_id)").in("status", ["eligible", "processing", "failed"]).order("created_at"),
-      supabase.from("reviewer_payments").select("id,submission_id,reviewer_id,reviewed_video_count,rate_per_video,amount,currency,status,created_at,payout_accounts(bank_name,account_name,account_last4,verified_at)").in("status", ["eligible", "processing", "failed"]).order("created_at"),
+      supabase.from("payments").select("id,submission_id,user_id,amount,currency,status,provider_transaction_reference,created_at,payout_accounts(bank_name,account_name,account_last4,verified_at,provider),submissions(participant_id)").in("status", ["eligible", "processing", "failed"]).order("created_at"),
+      supabase.from("reviewer_payments").select("id,submission_id,reviewer_id,reviewed_video_count,rate_per_video,amount,currency,status,created_at,payout_accounts(bank_name,account_name,account_last4,verified_at,provider)").in("status", ["eligible", "processing", "failed"]).order("created_at"),
       supabase.from("reviewer_compensation_policies").select("amount_per_video,currency,effective_at").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle(),
       supabase.from("audit_events").select("id,action,entity_type,entity_id,created_at").order("created_at", { ascending: false }).limit(25),
       supabase.from("dataset_releases").select("*").order("created_at", { ascending: false }),
@@ -210,35 +214,65 @@ export function AdminOperations({ assignmentsOnly = false }: { assignmentsOnly?:
 
   async function processReviewerPayment(id: string) {
     if (!window.confirm("Send this reviewer payment to the verified payment destination?")) return;
+    setPaymentSaving(true);
     const { error } = await getSupabase()!.functions.invoke("process-reviewer-payment", { body: { paymentId: id } });
+    setPaymentSaving(false);
     setMessage(error ? error.message : "Reviewer payment started. Final confirmation will come from the payment provider.");
-    if (!error) refresh();
+    if (!error) {
+      setSelectedPayment(null);
+      refresh();
+    }
   }
 
-  async function markParticipantPaymentPaid(id: string) {
-    const reference = window.prompt("Enter the bank transfer or payment reference. This will mark the participant as paid.");
-    if (reference === null) return;
+  async function processParticipantPayment(submissionId: string) {
+    if (!window.confirm("Send this participant payment through Paystack to the verified payment destination?")) return;
+    setPaymentSaving(true);
+    const { error } = await getSupabase()!.functions.invoke("process-payment", { body: { submissionId } });
+    setPaymentSaving(false);
+    setMessage(error ? error.message : "Participant payment started. Final confirmation will come from Paystack.");
+    if (!error) {
+      setSelectedPayment(null);
+      refresh();
+    }
+  }
+
+  async function markParticipantPaymentPaid(id: string, reference: string) {
     if (reference.trim().length < 3) {
       setMessage("Enter a valid payment reference before marking this payment paid.");
       return;
     }
-    if (!window.confirm("Confirm that the money has already been sent to the verified participant account?")) return;
+    if (!paymentSentConfirmed || !window.confirm("Confirm that the money has already been sent to this participant account?")) return;
+    setPaymentSaving(true);
     const { error } = await getSupabase()!.rpc("mark_participant_payment_paid", { p_payment_id: id, p_reference: reference.trim() });
+    setPaymentSaving(false);
     setMessage(error ? error.message : "Participant payment marked paid and the participant was notified.");
-    if (!error) refresh();
+    if (!error) {
+      setSelectedPayment(null);
+      refresh();
+    }
   }
 
-  async function markReviewerPaymentPaid(id: string) {
-    const reference = window.prompt("Enter the bank transfer or payment reference. This will mark the reviewer as paid.");
-    if (reference === null) return;
+  async function markReviewerPaymentPaid(id: string, reference: string) {
     if (reference.trim().length < 3) {
       setMessage("Enter a valid payment reference before marking this reviewer payment paid.");
       return;
     }
-    if (!window.confirm("Confirm that the reviewer has already received this payment?")) return;
+    if (!paymentSentConfirmed || !window.confirm("Confirm that the money has already been sent to this reviewer account?")) return;
+    setPaymentSaving(true);
     const { error } = await getSupabase()!.rpc("mark_reviewer_payment_paid", { p_payment_id: id, p_reference: reference.trim() });
+    setPaymentSaving(false);
     setMessage(error ? error.message : "Reviewer payment marked paid and the reviewer was notified.");
-    if (!error) refresh();
+    if (!error) {
+      setSelectedPayment(null);
+      refresh();
+    }
+  }
+
+  function openPayment(kind: "participant" | "reviewer", row: Row, name: string) {
+    setSelectedPayment({ kind, row, name });
+    setPaymentReference("");
+    setPaymentSentConfirmed(false);
+    setMessage("");
   }
 
   async function decideManualPayout(userId: string, approve: boolean) {
@@ -354,6 +388,12 @@ export function AdminOperations({ assignmentsOnly = false }: { assignmentsOnly?:
     return [row.display_name, row.participant_id, row.email, row.phone, row.bank_name, row.account_name]
       .some((value) => String(value || "").toLowerCase().includes(term));
   });
+  const selectedPaymentUserId = selectedPayment ? String(selectedPayment.kind === "participant" ? selectedPayment.row.user_id : selectedPayment.row.reviewer_id) : "";
+  const selectedPaymentDirectory = accountDirectory.find((row) => String(row.user_id) === selectedPaymentUserId);
+  const selectedPaymentPayout = selectedPayment ? related(selectedPayment.row, "payout_accounts") : {};
+  const selectedPaymentAccountNumber = String(selectedPaymentDirectory?.account_number || "");
+  const selectedPaymentProvider = String(selectedPaymentPayout.provider || selectedPaymentDirectory?.payout_source || "");
+  const selectedPaymentCanUsePaystack = selectedPaymentProvider === "paystack" && Boolean(selectedPaymentPayout.verified_at);
 
   const assignmentPanel = <section className="ops-card wide-ops-card" aria-labelledby="assignment-heading">
     <div className="section-head"><div><h3 id="assignment-heading">Assign reviewers</h3><p className="ops-hint">Choose a reviewer whose selected languages match the recorded categories, then select Assign reviewer.</p></div><button onClick={() => void refresh()} disabled={assignmentsLoading}>Refresh</button></div>
@@ -379,6 +419,20 @@ export function AdminOperations({ assignmentsOnly = false }: { assignmentsOnly?:
     {message && <p className="auth-message">{message}</p>}
     <div className="metric-grid"><div><span>Account requests</span><b>{pendingAccounts.length}</b><small>New accounts awaiting approval</small></div><div><span>Pending reviews</span><b>{pendingSubmissions.length}</b><small>Submissions requiring assignment or action</small></div><div><span>Reviewers</span><b>{staffMembers.filter((member) => member.role === "reviewer").length}</b><small>Active reviewer accounts</small></div><div><span>Participant payments</span><b>₦{payments.reduce((total, payment) => total + Number(payment.amount || 0), 0).toLocaleString()}</b><small>Eligible, processing, or failed</small></div><div><span>Reviewer payments</span><b>₦{reviewerPayments.reduce((total, payment) => total + Number(payment.amount || 0), 0).toLocaleString()}</b><small>Eligible, processing, or failed</small></div></div>
     <div className="ops-grid">
+      {selectedPayment && <div className="ops-card wide-ops-card payment-detail-panel">
+        <div className="section-head"><div><div className="eyebrow">{selectedPayment.kind === "participant" ? "Participant" : "Reviewer"} payment</div><h3>Pay {selectedPayment.name}</h3><p className="ops-hint">Check the recipient and amount first. Mark this paid only after the transfer has actually succeeded.</p></div><button onClick={() => setSelectedPayment(null)}>Close</button></div>
+        <div className="payment-detail-grid">
+          <div><small>Amount due</small><b>{String(selectedPayment.row.currency)} {Number(selectedPayment.row.amount || 0).toLocaleString()}</b></div>
+          <div><small>Bank</small><b>{String(selectedPaymentDirectory?.bank_name || selectedPaymentPayout.bank_name || "Not supplied")}</b></div>
+          <div><small>Account name</small><b>{String(selectedPaymentDirectory?.account_name || selectedPaymentPayout.account_name || "Not supplied")}</b></div>
+          <div><small>Account number</small><b>{selectedPaymentAccountNumber || `Only ending ${String(selectedPaymentDirectory?.account_last4 || selectedPaymentPayout.account_last4 || "----")} is available`}</b></div>
+        </div>
+        {!selectedPaymentAccountNumber && <p className="submission-warning">NaijaVision does not possess the full number for this older Paystack record. Use Paystack below, or ask the user to submit their payment details again before making a manual transfer.</p>}
+        <div className="payment-methods">
+          <div><h4>Option 1: Pay with Paystack</h4><p>Paystack sends to the verified recipient using your funded Paystack balance. OPay works only when Paystack accepted it as the recipient bank.</p><button className="primary" disabled={!selectedPaymentCanUsePaystack || paymentSaving || selectedPayment.row.status === "processing"} onClick={() => selectedPayment.kind === "participant" ? void processParticipantPayment(String(selectedPayment.row.submission_id)) : void processReviewerPayment(String(selectedPayment.row.id))}>{selectedPayment.row.status === "processing" ? "Payment processing" : paymentSaving ? "Starting payment..." : "Pay with Paystack"}</button>{!selectedPaymentCanUsePaystack && <small>Automatic transfer unavailable: this payment destination is not a Paystack-verified recipient.</small>}</div>
+          <div><h4>Option 2: Record a manual transfer</h4><p>Transfer the exact amount using your bank or OPay app, then enter the successful transaction reference.</p><label><span>Transfer reference</span><input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} placeholder="Enter the successful bank or OPay reference" /></label><label className="payment-confirmation"><input type="checkbox" checked={paymentSentConfirmed} onChange={(event) => setPaymentSentConfirmed(event.target.checked)} /><span>I confirm that the money has already been sent successfully.</span></label><button className="primary" disabled={!selectedPaymentAccountNumber || paymentReference.trim().length < 3 || !paymentSentConfirmed || paymentSaving} onClick={() => selectedPayment.kind === "participant" ? void markParticipantPaymentPaid(String(selectedPayment.row.id), paymentReference) : void markReviewerPaymentPaid(String(selectedPayment.row.id), paymentReference)}>{paymentSaving ? "Saving..." : "Mark as paid"}</button></div>
+        </div>
+      </div>}
       <div className="ops-card wide-ops-card"><h3>Pending account requests</h3><p className="ops-hint">Approve a verified applicant before they can access consent, surveys, recordings, or staff work.</p>{pendingAccounts.length ? pendingAccounts.map((row) => <div className="ops-row" key={String(row.user_id)}><span><b>{String(row.display_name || "Unnamed")}</b> | {String(row.participant_id)}<small>Requested {new Date(String(row.created_at)).toLocaleString()}</small></span><button onClick={() => decideAccount(String(row.user_id), true)}>Approve account</button><button className="danger" onClick={() => decideAccount(String(row.user_id), false)}>Decline</button></div>) : <p>No accounts are awaiting approval.</p>}</div>
       {messageRecipient && <div className="ops-card wide-ops-card"><div className="section-head"><div><h3>Message {String(messageRecipient.display_name || messageRecipient.participant_id || "user")}</h3><p className="ops-hint">This private message will appear in the user&apos;s dashboard notifications.</p></div><button onClick={() => setMessageRecipient(null)}>Cancel</button></div><label><span>Title</span><input maxLength={120} value={adminMessageTitle} onChange={(event) => setAdminMessageTitle(event.target.value)} placeholder="For example: Please update your payment details" /></label><label><span>Message</span><textarea maxLength={2000} rows={5} value={adminMessageBody} onChange={(event) => setAdminMessageBody(event.target.value)} placeholder="Write the instructions the user should see" /></label><button className="primary" disabled={sendingAdminMessage || adminMessageTitle.trim().length < 3 || adminMessageBody.trim().length < 3} onClick={() => void sendUserMessage()}>{sendingAdminMessage ? "Sending..." : "Send notification"}</button></div>}
       <div className="ops-card wide-ops-card"><h3>All account information</h3><p className="ops-hint">Restricted administrator view. New and updated payment details include a protected full account number. Older provider-verified records remain masked until the user updates their payment details once.</p><input value={accountDirectoryQuery} onChange={(event) => setAccountDirectoryQuery(event.target.value)} placeholder="Search name, participant ID, email, phone, or bank" />{filteredAccountDirectory.length ? filteredAccountDirectory.map((row) => { const userId = String(row.user_id); const fullNumber = String(row.account_number || ""); const visibleNumber = fullNumber ? revealedAccounts[userId] ? fullNumber : `••••••${fullNumber.slice(-4)}` : `••••${String(row.account_last4 || "----")}`; return <div className="ops-row account-directory-row" key={userId}><span><b>{String(row.display_name || "Unnamed")} | {String(row.participant_id)}</b><small>{String(row.email || "No email")} | {String(row.phone || "No phone")} | {String(row.role)} | {String(row.account_status)}</small><small>{row.bank_name ? `${String(row.bank_name)} | ${String(row.account_name || "Account name unavailable")} | ${visibleNumber}` : "No payment details supplied"}</small><small>Payment details: {String(row.payout_status)} | Source: {String(row.payout_source)}</small>{row.bank_name && !fullNumber && <small>Full number unavailable from the older record. Ask this user to open Update payment details and submit it again.</small>}</span><button onClick={() => { setMessageRecipient(row); setAdminMessageTitle(""); setAdminMessageBody(""); }}>Message user</button>{fullNumber && <button onClick={() => setRevealedAccounts((current) => ({ ...current, [userId]: !current[userId] }))}>{revealedAccounts[userId] ? "Hide number" : "Show full number"}</button>}{row.payout_status === "pending" && <><button onClick={() => decideManualPayout(userId, true)}>Approve details</button><button className="danger" onClick={() => decideManualPayout(userId, false)}>Return for correction</button></>}</div>; }) : <p>No accounts match this search.</p>}</div>
@@ -393,8 +447,8 @@ export function AdminOperations({ assignmentsOnly = false }: { assignmentsOnly?:
     <div className="ops-grid">
       <div className="ops-card"><h3>Withdrawal requests</h3>{withdrawals.length ? withdrawals.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.submission_id || "Account request")}</span><button onClick={() => completeWithdrawal(String(row.id), String(row.submission_id || ""))}>Complete</button></div>) : <p>No open requests.</p>}</div>
       <div className="ops-card"><h3>Risk flags</h3>{risks.length ? risks.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.flag_type)} · {String(row.score)}</span><button onClick={() => resolveRisk(String(row.id), "dismissed")}>Dismiss</button><button onClick={() => resolveRisk(String(row.id), "confirmed")}>Confirm</button></div>) : <p>No open flags.</p>}</div>
-      <div className="ops-card"><h3>Participant payment queue</h3><p className="ops-hint">The full account number is not stored in NaijaVision. Confirm the verified bank, account name, ending digits, and amount before recording an external transfer as paid.</p>{payments.length ? payments.map((row) => <ParticipantPaymentRow key={String(row.id)} row={row} onMarkPaid={markParticipantPaymentPaid} />) : <p>No participant payments require action.</p>}</div>
-      <div className="ops-card"><h3>Reviewer payment queue</h3><p className="ops-hint">Process an automatic transfer, or use Mark paid only after completing an external transfer. A reference is required and the reviewer will be notified.</p>{reviewerPayments.length ? reviewerPayments.map((row) => { const reviewer = staffMembers.find((member) => member.user_id === row.reviewer_id); const account = related(row, "payout_accounts"); return <div className="ops-row payment-queue-row" key={String(row.id)}><span><b>{String(reviewer?.display_name || reviewer?.participant_id || "Reviewer")}</b><small>{String(row.reviewed_video_count)} videos × {String(row.rate_per_video)} {String(row.currency)} = {String(row.amount)} {String(row.currency)} | {String(row.status)}</small><small>{account.verified_at ? `${String(account.bank_name)} | ${String(account.account_name)} | ending ${String(account.account_last4)}` : "No verified reviewer payment destination"}</small></span>{row.status !== "processing" && <button disabled={!account.verified_at} onClick={() => processReviewerPayment(String(row.id))}>{row.status === "failed" ? "Retry automatic payment" : "Process payment"}</button>}<button onClick={() => markReviewerPaymentPaid(String(row.id))}>Mark paid</button></div>; }) : <p>No reviewer payments require action.</p>}</div>
+      <div className="ops-card"><h3>Participant payment queue</h3><p className="ops-hint">Open a payment to see the amount and available account details before transferring or using Paystack.</p>{payments.length ? payments.map((row) => <ParticipantPaymentRow key={String(row.id)} row={row} onOpen={(payment) => openPayment("participant", payment, String(related(payment, "submissions").participant_id || "Participant"))} />) : <p>No participant payments require action.</p>}</div>
+      <div className="ops-card"><h3>Reviewer payment queue</h3><p className="ops-hint">Open a payment to inspect the reviewer, amount, and payment destination. Paystack and manual-transfer paths remain separate.</p>{reviewerPayments.length ? reviewerPayments.map((row) => { const reviewer = staffMembers.find((member) => member.user_id === row.reviewer_id); const account = related(row, "payout_accounts"); const reviewerName = String(reviewer?.display_name || reviewer?.participant_id || "Reviewer"); return <div className="ops-row payment-queue-row" key={String(row.id)}><span><b>{reviewerName}</b><small>{String(row.reviewed_video_count)} videos × {String(row.rate_per_video)} {String(row.currency)} = {String(row.amount)} {String(row.currency)} | {String(row.status)}</small><small>{account.verified_at ? `${String(account.bank_name)} | ${String(account.account_name)} | ending ${String(account.account_last4)}` : "No verified reviewer payment destination"}</small></span><button onClick={() => openPayment("reviewer", row, reviewerName)}>Open payment</button></div>; }) : <p>No reviewer payments require action.</p>}</div>
       <div className="ops-card"><h3>Recent audit events</h3>{audit.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.action)} · {String(row.entity_type)}</span><small>{new Date(String(row.created_at)).toLocaleString()}</small></div>)}</div>
       <div className="ops-card"><h3>Release pipeline</h3><p className="ops-hint">This controls publication of a complete dataset release. It is separate from approving or rejecting individual participant recordings.</p>{releases.length ? releases.map((row) => <div className="ops-row" key={String(row.id)}><span>{String(row.name)} {String(row.version)} | {String(row.status)}{row.rejection_reason ? ` | ${String(row.rejection_reason)}` : ""}</span>{row.status === "draft" && <button onClick={() => advanceRelease(String(row.id), "privacy_review")}>Send to privacy review</button>}{row.status === "privacy_review" && <><button onClick={() => returnReleaseToDraft(String(row.id))}>Return to draft</button><button className="danger" onClick={() => rejectRelease(String(row.id))}>Reject</button><button onClick={() => advanceRelease(String(row.id), "approved")}>Approve</button></>}{row.status === "rejected" && <button onClick={() => returnReleaseToDraft(String(row.id))}>Return to draft</button>}{row.status === "approved" && <button onClick={() => advanceRelease(String(row.id), "published")}>Publish</button>}</div>) : <p>No release drafts.</p>}</div>
     </div>

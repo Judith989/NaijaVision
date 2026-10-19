@@ -191,7 +191,7 @@ test("administrators can manually mark reviewer compensation paid once", async (
   assert.match(migration, /Reviewer compensation sent/);
   assert.match(migration, /reviewer_payment\.manually_marked_paid/);
   assert.match(administration, /mark_reviewer_payment_paid/);
-  assert.match(administration, /Mark paid/);
+  assert.match(administration, /Mark as paid/);
 });
 
 test("participants can update payment details while a submission is under review", async () => {
@@ -209,4 +209,16 @@ test("participants replace only the individual recordings returned for redo", as
   assert.match(contribution, /supabase\.from\("recordings"\)\.update\(payload\)\.eq\("id", existing\.id\)/);
   assert.match(contribution, /Your other submitted videos remain saved and will not need to be recorded again/);
   assert.match(contribution, /clips\.length !== prompts\.length/);
+});
+
+test("administrators inspect payment details before Paystack or manual payment", async () => {
+  const administration = await read("src/app/AdminOperations.tsx");
+  assert.match(administration, /Open payment/);
+  assert.match(administration, /Amount due/);
+  assert.match(administration, /Account number/);
+  assert.match(administration, /Pay with Paystack/);
+  assert.match(administration, /Transfer reference/);
+  assert.match(administration, /money has already been sent successfully/);
+  assert.match(administration, /mark_participant_payment_paid/);
+  assert.match(administration, /mark_reviewer_payment_paid/);
 });
