@@ -96,6 +96,21 @@ test("reviewers can decide recordings in bulk without premature or duplicate ear
   assert.match(paymentGuard, /set status = 'cancelled'/);
 });
 
+test("assigned reviewers can return marked clips directly to participants", async () => {
+  const [contribution, directRedo] = await Promise.all([
+    read("src/app/page.tsx"),
+    read("supabase/migrations/202610190001_direct_reviewer_redo.sql"),
+  ]);
+  assert.match(contribution, /Return marked clips to participant/);
+  assert.match(contribution, /onClick=\{returnClipsToParticipant\}/);
+  assert.match(directRedo, /assigned_reviewer_id is distinct from auth\.uid\(\)/);
+  assert.doesNotMatch(directRedo, /administrator must return this review/i);
+  assert.match(directRedo, /status = 'changes_requested'/);
+  assert.match(directRedo, /admin_review_status = 'participant_returned'/);
+  assert.match(directRedo, /insert into public\.notifications/);
+  assert.match(directRedo, /'Recordings need to be redone'/);
+});
+
 test("participant forms distinguish required and optional information", async () => {
   const contribution = await read("src/app/page.tsx");
   assert.match(contribution, /required-badge/);
