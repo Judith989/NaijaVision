@@ -200,3 +200,13 @@ test("participants can update payment details while a submission is under review
   assert.match(contribution, /if \(editingPayment\) \{\s*setStep\("account"\)/);
   assert.match(contribution, /Update payment details\./);
 });
+
+test("participants replace only the individual recordings returned for redo", async () => {
+  const contribution = await read("src/app/page.tsx");
+  assert.match(contribution, /eligible\.filter\(\(prompt\) => redoPromptIds\.includes\(prompt\.id\)\)/);
+  assert.match(contribution, /\.in\("decision", \["rejected", "changes_requested"\]\)/);
+  assert.match(contribution, /setRedoPromptIds\(redoIds\.length \? redoIds : legacyFallbackIds\)/);
+  assert.match(contribution, /supabase\.from\("recordings"\)\.update\(payload\)\.eq\("id", existing\.id\)/);
+  assert.match(contribution, /Your other submitted videos remain saved and will not need to be recorded again/);
+  assert.match(contribution, /clips\.length !== prompts\.length/);
+});

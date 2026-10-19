@@ -2063,6 +2063,8 @@ export default function Home() {
             <div className="eyebrow">Participant profile</div>
             <div className="profile-row"><b>{profile.code}</b>{authVerified && <span className="verified-badge">Verified</span>}</div>
 
+            {redoPromptIds && <div className="participant-redo-comment"><b>{prompts.length === 1 ? "One recording needs to be redone" : `${prompts.length} recordings need to be redone`}</b><p>Only the recording{prompts.length === 1 ? "" : "s"} listed here must be replaced. Your other submitted videos remain saved and will not need to be recorded again.</p></div>}
+
             <div className="eyebrow" style={{ marginTop: 22 }}>Your session</div><h3>{acceptedCount} of {prompts.length} saved</h3>
             <div className="progress"><i style={{ width: `${progress}%` }} /></div>
             <div className="earnings-row">
@@ -2126,7 +2128,7 @@ export default function Home() {
 
       {step === "review" && (
         <section className="shell review-shell">
-          <div className="section-head"><div><div className="eyebrow">Review your recordings</div><h2>Check before you submit.</h2><p>Accepted clips are saved securely as you go. Play any clip, remove a problem recording, or return to recording. Final submission sends the complete contribution to a human reviewer.</p></div><span className="time-pill">{clips.length} clips</span></div>
+          <div className="section-head"><div><div className="eyebrow">Review your recordings</div><h2>{redoPromptIds ? "Check your replacement before resubmitting." : "Check before you submit."}</h2><p>{redoPromptIds ? `Only ${prompts.length === 1 ? "this returned recording" : `these ${prompts.length} returned recordings`} will be replaced. Every other video from your original submission remains saved.` : "Accepted clips are saved securely as you go. Play any clip, remove a problem recording, or return to recording. Final submission sends the complete contribution to a human reviewer."}</p></div><span className="time-pill">{clips.length} clip{clips.length === 1 ? "" : "s"}</span></div>
           <div className="participant-review">
             <div className="review-list">
               {clips.map((clip, index) => <div className="review-row" key={clip.id}><span>{index + 1}</span><div><b>{clip.promptId} · {clip.language}</b><small>{clip.transcript}</small></div><em>{clip.duration.toFixed(1)}s</em><button className="download" onClick={() => void playSavedRecording(clip)}>Play</button><button className="download" onClick={() => void downloadSavedRecording(clip)}>Download</button><button className="download danger" onClick={async () => { if (!window.confirm(`Remove recording ${clip.promptId}? You will need to record this prompt again before submitting.`)) return; try { await removeAcceptedClip(clip); } catch { setToast("The recording could not be removed. Please try again."); return; } if (reviewMedia) { URL.revokeObjectURL(reviewMedia); setReviewMedia(""); } }}>Remove</button></div>)}
@@ -2142,7 +2144,7 @@ export default function Home() {
           <div className="notice"><Mark>i</Mark><p><b>Payment follows approval.</b> Submit only after checking the recordings. A reviewer validates the files first, then an administrator processes compensation to the payment destination shown above.</p></div>
           {uploadProgress > 0 && uploadProgress < 100 && <div className="upload-progress"><i style={{ width: `${uploadProgress}%` }} /><span>Uploading securely: {uploadProgress}%</span></div>}
           <div className="footer-actions"><button className="secondary" onClick={returnToRecording}>{clips.length === prompts.length ? "Return to recordings" : "Record next missing prompt"}</button><button className="primary" disabled={clips.length !== prompts.length || (uploadProgress > 0 && uploadProgress < 100)} onClick={uploadAndFinalizeSubmission}>Submit for review and payment <span>→</span></button></div>
-          {clips.length !== prompts.length && <p className="submission-warning">Complete all {prompts.length} required prompts or remove and re-record missing clips before submitting.</p>}
+          {clips.length !== prompts.length && <p className="submission-warning">Complete {redoPromptIds ? `the ${prompts.length} returned prompt${prompts.length === 1 ? "" : "s"}` : `all ${prompts.length} required prompts`} before submitting.</p>}
         </section>
       )}
 
