@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { backendConfigured, getSupabase } from "../lib/supabase";
+import { BASE_PATH } from "../lib/basePath";
 import { Mark } from "../lib/ui";
 
 export default function SignUpPage() {
@@ -53,7 +54,7 @@ export default function SignUpPage() {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: {
+      options: { emailRedirectTo: `${window.location.origin}${BASE_PATH}/dashboard`, data: {
         first_name: normalizedFirstName,
         last_name: normalizedLastName,
         full_name: `${normalizedFirstName} ${normalizedLastName}`,
@@ -71,7 +72,7 @@ export default function SignUpPage() {
       return;
     }
     if (data.session) {
-      router.push("/account-pending");
+      router.push("/dashboard");
       return;
     }
     setAwaitingConfirmation(true);
@@ -106,7 +107,7 @@ export default function SignUpPage() {
         {awaitingConfirmation ? (
           <div className="notice">
             <Mark>✓</Mark>
-            <p><b>Check your email.</b> NaijaVision sent a confirmation link to {email}. Confirm your address, then sign in. An administrator must approve the account before you can continue.</p>
+            <p><b>Check your email.</b> NaijaVision sent a confirmation link to {email}. Open the confirmation link to verify your address and start contributing immediately. No administrator approval is needed.</p>
           </div>
         ) : (
           <>

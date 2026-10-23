@@ -65,7 +65,7 @@ study partners before field deployment.
 1. Create a Supabase project and install the Supabase CLI.
    Configure the email and SMS templates to deliver a one-time code compatible
    with `verifyOtp`.
-2. Keep Supabase CAPTCHA protection disabled. Public signup is protected by email verification, database-enforced pending status, and mandatory administrator approval before platform access.
+2. Keep Supabase CAPTCHA protection disabled. Keep Confirm email enabled. Accounts activate automatically when Supabase confirms their email. Add the deployed /NaijaVision/dashboard URL to the Auth redirect allowlist.
 3. Link the project and apply the migrations:
 
 ```powershell
@@ -174,7 +174,7 @@ Deletion is refused unless the submission has an administrator `approved_at` tim
 
 ## Approving and cleaning up accounts
 
-New accounts remain pending after email confirmation. An administrator approves or declines them in **Admin workspace → Administration → Pending account requests**. Pending, suspended, closed, and missing profiles cannot enter the dashboard or contribution workflow.
+Apply `supabase/migrations/202610220001_email_verified_access.sql` before deploying the updated UI. New accounts become active automatically after email confirmation. Existing verified pending accounts are activated by the migration; suspended and closed accounts stay blocked. Staff roles still require an administrator. Keep Supabase Confirm email enabled and allow the deployed dashboard URL in Auth redirect URLs. A frontend deployment alone does not apply this database migration.
 
 The account cleanup tool preserves the five selected participant IDs configured in the script and every administrator account. Its default mode is read-only:
 

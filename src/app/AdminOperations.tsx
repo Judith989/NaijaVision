@@ -76,7 +76,6 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
   const [activePolicy, setActivePolicy] = useState<Row | null>(null);
   const [participantQuery, setParticipantQuery] = useState("");
   const [participants, setParticipants] = useState<Row[]>([]);
-  const [pendingAccounts, setPendingAccounts] = useState<Row[]>([]);
   const [accountDirectory, setAccountDirectory] = useState<Row[]>([]);
   const [accountDirectoryQuery, setAccountDirectoryQuery] = useState("");
   const [revealedAccounts, setRevealedAccounts] = useState<Record<string, boolean>>({});
@@ -96,7 +95,7 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
     if (!supabase) return;
     setAssignmentsLoading(true);
     setAssignmentError("");
-    const [withdrawalResult, riskResult, paymentResult, reviewerPaymentResult, reviewerPolicyResult, auditResult, releaseResult, staffMemberResult, submissionResult, allSubmissionResult, policyResult, pendingAccountResult, accountDirectoryResult, adminMessageResult] = await Promise.all([
+    const [withdrawalResult, riskResult, paymentResult, reviewerPaymentResult, reviewerPolicyResult, auditResult, releaseResult, staffMemberResult, submissionResult, allSubmissionResult, policyResult, accountDirectoryResult, adminMessageResult] = await Promise.all([
       supabase.from("withdrawal_requests").select("*").in("status", ["requested", "processing"]).order("requested_at"),
       supabase.from("risk_flags").select("*").eq("status", "open").order("score", { ascending: false }),
       supabase.from("payments").select("id,submission_id,user_id,amount,currency,status,provider,provider_transaction_reference,processed_at,created_at,payout_accounts(bank_name,account_name,account_last4,verified_at,provider),submissions(participant_id)").order("created_at", { ascending: false }),
@@ -108,7 +107,6 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
       supabase.from("submissions").select("id,user_id,participant_id,status,expected_recordings,assigned_reviewer_id,created_at,recordings(language,prompt_assignments(prompt_id))").in("status", ["automated_qc", "awaiting_review", "resubmitted"]).order("created_at"),
       supabase.from("submissions").select("id,user_id,participant_id,status,expected_recordings,assigned_reviewer_id,created_at,updated_at,submitted_at,reviewed_at,paid_at,recordings(id)").order("created_at", { ascending: false }),
       supabase.from("compensation_policies").select("id,amount,currency,pricing_basis,effective_at").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle(),
-      supabase.rpc("list_verified_pending_accounts"),
       supabase.rpc("list_admin_account_information"),
       supabase.rpc("list_admin_message_replies"),
     ]);
@@ -127,7 +125,6 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
     setPendingSubmissions((submissionResult.data || []) as unknown as Row[]);
     setAllSubmissions((allSubmissionResult.data || []) as unknown as Row[]);
     setActivePolicy(policyResult.data || null);
-    setPendingAccounts(pendingAccountResult.data || []);
     setAccountDirectory(accountDirectoryResult.data || []);
     setAdminMessageReplies(adminMessageResult.data || []);
     setAssignmentError(submissionResult.error?.message || allSubmissionResult.error?.message || staffMemberResult.error?.message || "");
@@ -167,25 +164,6 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
     const { error } = await supabase!.rpc("set_staff_role", { p_user_id: id, p_role: nextRole });
     setMessage(error ? error.message : nextRole === "participant" ? "Role changed to participant." : `Role changed to ${nextRole}.`);
     await Promise.all([refresh(), searchParticipants()]);
-  }
-
-  async function decideAccount(id: string, approve: boolean) {
-    const supabase = getSupabase();
-    if (!supabase) return;
-    if (approve) {
-      if (!window.confirm("Approve this account and allow access to NaijaVision?")) return;
-      const { error } = await supabase.rpc("approve_account", { p_user_id: id });
-      setMessage(error ? error.message : "Account approved. The person can now continue.");
-      if (!error) refresh();
-      return;
-    }
-    const reason = window.prompt("Why are you declining this account request?");
-    if (reason === null) return;
-    if (!reason.trim()) { setMessage("Enter a reason before declining the account."); return; }
-    if (!window.confirm("Decline this account request?")) return;
-    const { error } = await supabase.rpc("decline_account", { p_user_id: id, p_reason: reason.trim() });
-    setMessage(error ? error.message : "Account request declined.");
-    if (!error) refresh();
   }
 
   async function createPolicy() {
@@ -493,7 +471,7 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
   return <section className="admin-operations" id="staff-management">
     <div className="section-head"><div><div className="eyebrow">Administrator controls</div><h2>Operations and governance</h2></div></div>
     {message && <p className="auth-message">{message}</p>}
-    <div className="metric-grid"><div><span>Account requests</span><b>{pendingAccounts.length}</b><small>New accounts awaiting approval</small></div><div><span>Pending reviews</span><b>{pendingSubmissions.length}</b><small>Submissions requiring assignment or action</small></div><div><span>Total still to pay</span><b>₦{totalToPay.toLocaleString()}</b><small>Eligible and failed payments</small></div><div><span>Processing</span><b>₦{totalProcessing.toLocaleString()}</b><small>Transfers currently in progress</small></div><div><span>Total paid</span><b>₦{totalPaid.toLocaleString()}</b><small>Participant and reviewer payments</small></div></div>
+    <div className="metric-grid"><div><span>Reviewers</span><b>{staffMembers.filter((member) => member.role === "reviewer").length}</b><small>Active reviewer accounts</small></div><div><span>Pending reviews</span><b>{pendingSubmissions.length}</b><small>Submissions requiring assignment or action</small></div><div><span>Total still to pay</span><b>₦{totalToPay.toLocaleString()}</b><small>Eligible and failed payments</small></div><div><span>Processing</span><b>₦{totalProcessing.toLocaleString()}</b><small>Transfers currently in progress</small></div><div><span>Total paid</span><b>₦{totalPaid.toLocaleString()}</b><small>Participant and reviewer payments</small></div></div>
     <div className="ops-card wide-ops-card"><div className="section-head"><div><h3>All participant submissions</h3><p className="ops-hint">Every submission is shown here, including empty drafts and recording-stage work that does not yet appear in the reviewer or approval queues.</p></div><span className="status needs-review">{allSubmissions.length} total</span></div>{allSubmissions.length ? allSubmissions.map((row) => { const assigned = staffMembers.find((member) => member.user_id === row.assigned_reviewer_id); const recordingCount = Array.isArray(row.recordings) ? row.recordings.length : 0; return <div className="ops-row payment-history-row" key={String(row.id)}><span><b>{String(row.participant_id)} · {String(row.status).replaceAll("_", " ")}</b><small>Submission {String(row.id).slice(0, 8)} · {recordingCount} saved recording{recordingCount === 1 ? "" : "s"} · target {String(row.expected_recordings)}</small><small>Created {new Date(String(row.created_at)).toLocaleString()} · Updated {new Date(String(row.updated_at || row.created_at)).toLocaleString()} · Reviewer: {String(assigned?.display_name || assigned?.participant_id || "Not assigned")}</small></span><span className={`status ${row.status === "paid" ? "accepted" : row.status === "rejected" ? "rejected" : "needs-review"}`}>{String(row.status).replaceAll("_", " ")}</span></div>; }) : <p>No submissions exist yet.</p>}</div>
     <div className="ops-grid">
       {selectedPayment && <div className="ops-card wide-ops-card payment-detail-panel">
@@ -510,7 +488,6 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
           <div><h4>Option 2: Record a manual transfer</h4><p>Transfer the exact amount using your bank or OPay app, then enter the successful transaction reference.</p><label><span>Transfer reference</span><input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} placeholder="Enter the successful bank or OPay reference" /></label><label className="payment-confirmation"><input type="checkbox" checked={paymentSentConfirmed} onChange={(event) => setPaymentSentConfirmed(event.target.checked)} /><span>I confirm that the money has already been sent successfully.</span></label><button className="primary" disabled={!selectedPaymentAccountNumber || paymentReference.trim().length < 3 || !paymentSentConfirmed || paymentSaving} onClick={() => selectedPayment.kind === "participant" ? void markParticipantPaymentPaid(String(selectedPayment.row.id), paymentReference) : void markReviewerPaymentPaid(String(selectedPayment.row.id), paymentReference)}>{paymentSaving ? "Saving..." : "Mark as paid"}</button></div>
         </div>
       </div>}
-      <div className="ops-card wide-ops-card"><h3>Pending account requests</h3><p className="ops-hint">Approve a verified applicant before they can access consent, surveys, recordings, or staff work.</p>{pendingAccounts.length ? pendingAccounts.map((row) => <div className="ops-row" key={String(row.user_id)}><span><b>{String(row.display_name || "Unnamed")}</b> | {String(row.participant_id)}<small>Requested {new Date(String(row.created_at)).toLocaleString()}</small></span><button onClick={() => decideAccount(String(row.user_id), true)}>Approve account</button><button className="danger" onClick={() => decideAccount(String(row.user_id), false)}>Decline</button></div>) : <p>No accounts are awaiting approval.</p>}</div>
       {messageRecipient && <div className="ops-card wide-ops-card"><div className="section-head"><div><h3>Message {String(messageRecipient.display_name || messageRecipient.participant_id || "user")}</h3><p className="ops-hint">This private message will appear in the user&apos;s dashboard notifications.</p></div><button onClick={() => setMessageRecipient(null)}>Cancel</button></div><label><span>Title</span><input maxLength={120} value={adminMessageTitle} onChange={(event) => setAdminMessageTitle(event.target.value)} placeholder="For example: Please update your payment details" /></label><label><span>Message</span><textarea maxLength={2000} rows={5} value={adminMessageBody} onChange={(event) => setAdminMessageBody(event.target.value)} placeholder="Write the instructions the user should see" /></label><button className="primary" disabled={sendingAdminMessage || adminMessageTitle.trim().length < 3 || adminMessageBody.trim().length < 3} onClick={() => void sendUserMessage()}>{sendingAdminMessage ? "Sending..." : "Send notification"}</button></div>}
       <div className="ops-card wide-ops-card"><h3>All account information</h3><p className="ops-hint">Restricted administrator view. New and updated payment details include a protected full account number. Older provider-verified records remain masked until the user updates their payment details once.</p><input value={accountDirectoryQuery} onChange={(event) => setAccountDirectoryQuery(event.target.value)} placeholder="Search name, participant ID, email, phone, or bank" />{filteredAccountDirectory.length ? filteredAccountDirectory.map((row) => { const userId = String(row.user_id); const fullNumber = String(row.account_number || ""); const visibleNumber = fullNumber ? revealedAccounts[userId] ? fullNumber : `••••••${fullNumber.slice(-4)}` : `••••${String(row.account_last4 || "----")}`; return <div className="ops-row account-directory-row" key={userId}><span><b>{String(row.display_name || "Unnamed")} | {String(row.participant_id)}</b><small>{String(row.email || "No email")} | {String(row.phone || "No phone")} | {String(row.role)} | {String(row.account_status)}</small><small>{row.bank_name ? `${String(row.bank_name)} | ${String(row.account_name || "Account name unavailable")} | ${visibleNumber}` : "No payment details supplied"}</small><small>Payment details: {String(row.payout_status)} | Source: {String(row.payout_source)}</small>{row.bank_name && !fullNumber && <small>Full number unavailable from the older record. Ask this user to open Update payment details and submit it again.</small>}</span><button onClick={() => { setMessageRecipient(row); setAdminMessageTitle(""); setAdminMessageBody(""); }}>Message user</button>{fullNumber && <button onClick={() => setRevealedAccounts((current) => ({ ...current, [userId]: !current[userId] }))}>{revealedAccounts[userId] ? "Hide number" : "Show full number"}</button>}{row.payout_status === "pending" && <><button onClick={() => decideManualPayout(userId, true)}>Approve details</button><button className="danger" onClick={() => decideManualPayout(userId, false)}>Return for correction</button></>}</div>; }) : <p>No accounts match this search.</p>}</div>
       <div className="ops-card wide-ops-card"><h3>Messages and replies</h3><p className="ops-hint">Users receive your messages as dashboard notifications and can reply once to each message.</p>{adminMessageReplies.length ? adminMessageReplies.map((row) => <div className="ops-row" key={String(row.id)}><span><b>{String(row.recipient_name || "User")} | {String(row.participant_id)}</b><small>{String(row.title)} | Sent {new Date(String(row.created_at)).toLocaleString()}</small><small>{String(row.message)}</small>{row.reply ? <small><b>Reply:</b> {String(row.reply)} | {new Date(String(row.replied_at)).toLocaleString()}</small> : <small>Awaiting reply</small>}</span></div>) : <p>No administrator messages have been sent yet.</p>}</div>

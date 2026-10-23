@@ -4,7 +4,7 @@ import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("new accounts require administrator approval at the database boundary", async () => {
+test("historical account migration enforces active accounts and assigned staff access", async () => {
   const [sql, verifiedApproval] = await Promise.all([
     read("supabase/migrations/202609240001_account_approval.sql"),
     read("supabase/migrations/202609240003_verified_account_approval.sql"),
@@ -56,7 +56,7 @@ test("public authentication remains usable and privileged edge calls require act
   assert.doesNotMatch(signup, /captchaToken|HCaptcha/);
   assert.doesNotMatch(signin, /captchaToken|HCaptcha/);
   assert.doesNotMatch(forgot, /captchaToken|HCaptcha/);
-  assert.match(signup, /administrator must approve the account/i);
+  assert.match(signup, /No administrator approval is needed/i);
   assert.match(security, /eq\("role", "admin"\)\.eq\("account_status", "active"\)/);
   assert.match(payout, /requireActiveAccount\(user\.id\)/);
   assert.match(payout, /providerMessage/);
@@ -303,4 +303,22 @@ test("recording remains available on ordinary laptop cameras and CPU-only browse
   assert.match(contribution, /new MediaRecorder\(recordingStream, \{ mimeType: preferred \}\)/);
   assert.match(contribution, /Mouth tracking stopped unexpectedly/);
   assert.match(contribution, /if \(backendConfigured\) return;[\s\S]*loadClips\(\)/);
+});
+
+test("email confirmation replaces approval without reopening restricted accounts", async () => {
+  const sql = await read("supabase/migrations/202610220001_email_verified_access.sql");
+  const signup = await read("src/app/signup/page.tsx");
+  const admin = await read("src/app/AdminOperations.tsx");
+  assert.ok(sql.includes("case when new.email_confirmed_at is not null then 'active' else 'pending' end"));
+  assert.ok(sql.includes("after update of email_confirmed_at on auth.users"));
+  assert.ok(sql.includes("where user_id = new.id and account_status = 'pending'"));
+  assert.ok(sql.includes("and p.account_status = 'pending'"));
+  assert.ok(sql.includes("values (new.id, 'participant')"));
+  assert.ok(sql.includes("p.account_status = 'active'"));
+  assert.ok(sql.includes("u.email_confirmed_at is not null"));
+  assert.ok(!sql.includes("v_pending_count"));
+  assert.ok(sql.includes("revoke execute on function public.approve_account(uuid) from public, anon, authenticated"));
+  assert.ok(signup.includes("emailRedirectTo:"));
+  assert.ok(!admin.includes('rpc("approve_account"'));
+  assert.ok(!admin.includes('rpc("list_verified_pending_accounts"'));
 });
