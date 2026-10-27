@@ -229,6 +229,9 @@ test("administrators inspect payment details before Paystack or manual payment",
   assert.match(reviewWorkspace, /Participant payment details/);
   assert.match(reviewWorkspace, /Bank or OPay transfer reference/);
   assert.match(reviewWorkspace, /mark_participant_payment_paid/);
+  assert.match(reviewWorkspace, /reviewerPaymentsOnly/);
+  assert.match(administration, /Reviewer payments awaiting action/);
+  assert.match(administration, /markReviewerPaymentPaid/);
 });
 
 test("recording remains available on ordinary laptop cameras and CPU-only browsers", async () => {
