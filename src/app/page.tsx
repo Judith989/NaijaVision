@@ -39,6 +39,20 @@ type RecordingJoinRow = {
 };
 type RecordingReviewRow = { recording_id: string; decision: "approved" | "rejected" | "changes_requested"; comments?: string | null };
 type ReviewerPaymentRow = { reviewed_video_count: number; rate_per_video: number; amount: number; currency: string; status: string };
+type AdminPaymentDetail = {
+  id: string;
+  submissionId: string;
+  amount: number;
+  currency: string;
+  status: string;
+  participantName: string;
+  bankName: string;
+  accountName: string;
+  accountNumber: string;
+  accountLast4: string;
+  provider: string;
+  verifiedAt: string;
+};
 type ReviewQueueItem = { recordings: CategoryRecording[]; id: string; user_id: string; participant_id: string; status: string; expected_recordings: number; created_at: string; assigned_reviewer_id: string | null; recommendation?: "approved" | "rejected" | "changes_requested"; recommendation_status?: "pending" | "returned" | "accepted" | "participant_returned"; recommendation_updated_at?: string };
 
 function joinedPromptId(row: RecordingJoinRow) {
@@ -229,6 +243,10 @@ export default function Home() {
   const [redoComments, setRedoComments] = useState<Record<string, string>>({});
   const [reviewStatus, setReviewStatus] = useState<"pending" | "approved" | "changes-requested" | "declined">("pending");
   const [paymentStatus, setPaymentStatus] = useState<"not-eligible" | "eligible" | "approved">("not-eligible");
+  const [adminPaymentDetail, setAdminPaymentDetail] = useState<AdminPaymentDetail | null>(null);
+  const [adminPaymentLoading, setAdminPaymentLoading] = useState(false);
+  const [adminPaymentReference, setAdminPaymentReference] = useState("");
+  const [adminPaymentSent, setAdminPaymentSent] = useState(false);
   const [reviewMedia, setReviewMedia] = useState("");
   const [selectedReviewRecordingId, setSelectedReviewRecordingId] = useState("");
   const [recordingReviewDraft, setRecordingReviewDraft] = useState<{ recordingId: string; decision: "rejected" | "changes_requested"; comments: string } | null>(null);
@@ -1257,22 +1275,83 @@ export default function Home() {
     setSelectedReviewRecordingId("");
     setRecordingReviewDraft(null);
     setBulkReviewDraft(null);
+    setAdminPaymentDetail(null);
     setSelectedReviewId(id);
   }
 
-  async function approvePayment() {
+  async function openPaymentDetails() {
     const target = selectedReviewId || submissionId;
     const supabase = getSupabase();
-    if (!supabase || !target) {
-      setPaymentStatus("approved");
+    const participant = reviewQueue.find((item) => item.id === target);
+    if (!supabase || !target || !participant) return;
+    setAdminPaymentLoading(true);
+    setAdminPaymentReference("");
+    setAdminPaymentSent(false);
+    const [paymentResult, directoryResult] = await Promise.all([
+      supabase.from("payments")
+        .select("id,submission_id,amount,currency,status,payout_accounts(bank_name,account_name,account_last4,verified_at,provider)")
+        .eq("submission_id", target)
+        .maybeSingle(),
+      supabase.rpc("list_admin_account_information"),
+    ]);
+    setAdminPaymentLoading(false);
+    if (paymentResult.error || directoryResult.error || !paymentResult.data) {
+      setToast(paymentResult.error?.message || directoryResult.error?.message || "Payment details are not available yet.");
       return;
     }
+    const rawPayout = paymentResult.data.payout_accounts;
+    const payout = (Array.isArray(rawPayout) ? rawPayout[0] : rawPayout || {}) as Record<string, unknown>;
+    const directory = ((directoryResult.data || []) as Array<Record<string, unknown>>).find((row) => String(row.user_id) === participant.user_id);
+    setAdminPaymentDetail({
+      id: String(paymentResult.data.id),
+      submissionId: String(paymentResult.data.submission_id),
+      amount: Number(paymentResult.data.amount || 0),
+      currency: String(paymentResult.data.currency || "NGN"),
+      status: String(paymentResult.data.status || "eligible"),
+      participantName: participant.participant_id,
+      bankName: String(directory?.bank_name || payout.bank_name || "Not supplied"),
+      accountName: String(directory?.account_name || payout.account_name || "Not supplied"),
+      accountNumber: String(directory?.account_number || ""),
+      accountLast4: String(directory?.account_last4 || payout.account_last4 || "----"),
+      provider: String(payout.provider || directory?.payout_source || ""),
+      verifiedAt: String(payout.verified_at || ""),
+    });
+  }
+
+  async function approvePayment() {
+    const target = adminPaymentDetail?.submissionId;
+    const supabase = getSupabase();
+    if (!supabase || !target) return;
+    if (!window.confirm(`Send ${adminPaymentDetail.amount.toLocaleString()} ${adminPaymentDetail.currency} to ${adminPaymentDetail.participantName} through Paystack?`)) return;
+    setAdminPaymentLoading(true);
     const { error } = await supabase.functions.invoke("process-payment", { body: { submissionId: target } });
+    setAdminPaymentLoading(false);
     if (error) {
       setToast(error.message);
       return;
     }
+    setAdminPaymentDetail(null);
+    setToast("Paystack transfer started. The participant will be marked paid only after provider confirmation.");
     setPaymentStatus("approved");
+  }
+
+  async function markSelectedParticipantPaid() {
+    const supabase = getSupabase();
+    if (!supabase || !adminPaymentDetail || !adminPaymentSent || adminPaymentReference.trim().length < 3) return;
+    if (!window.confirm(`Confirm that ${adminPaymentDetail.amount.toLocaleString()} ${adminPaymentDetail.currency} has already been transferred to ${adminPaymentDetail.participantName}?`)) return;
+    setAdminPaymentLoading(true);
+    const { error } = await supabase.rpc("mark_participant_payment_paid", {
+      p_payment_id: adminPaymentDetail.id,
+      p_reference: adminPaymentReference.trim(),
+    });
+    setAdminPaymentLoading(false);
+    if (error) {
+      setToast(error.message);
+      return;
+    }
+    setAdminPaymentDetail(null);
+    setPaymentStatus("approved");
+    setToast("Payment marked paid. The participant has been notified.");
   }
 
   async function requestWithdrawal() {
@@ -2277,7 +2356,7 @@ export default function Home() {
           </div>
           <div className="review-side-column">
           <aside className="reviewer-media"><div className="reviewer-media-heading"><b>Video preview</b><small>{selectedReviewRecording ? `${selectedReviewRecording.prompt_id} | ${selectedReviewRecording.language}` : "Select Watch beside any recording"}</small></div>{reviewMedia ? <video src={reviewMedia} controls autoPlay playsInline /> : <div className="reviewer-media-empty">No video selected</div>}{selectedReviewRecording && <div className="expected-script"><span>Expected script</span><p>{selectedReviewRecording.original_transcript || selectedExpectedPrompt?.text || "No expected script was saved for this recording."}</p>{selectedExpectedPrompt?.translation && <><span>English translation</span><p>{selectedExpectedPrompt.translation}</p></>}<small>Compare the spoken audio and visible lip movement with this assigned text before choosing Approve, Decline, or Redo.</small>{selectedReviewRecording.review_comment && !recordingReviewDraft && <div className="saved-clip-comment"><b>Saved reviewer comment</b><p>{selectedReviewRecording.review_comment}</p></div>}</div>}{recordingReviewDraft && <div className="clip-comment-editor"><b>{recordingReviewDraft.decision === "rejected" ? "Why is this video declined?" : "What should the participant improve?"}</b><small>This comment is saved with this video and shown to the participant if it is returned.</small><textarea autoFocus value={recordingReviewDraft.comments} onChange={(event) => setRecordingReviewDraft({ ...recordingReviewDraft, comments: event.target.value })} placeholder="For example: The lips moved out of frame. Please keep your mouth centred and repeat the full sentence." /><div><button className="download" onClick={() => setRecordingReviewDraft(null)}>Cancel</button><button className="primary" disabled={recordingReviewDraft.comments.trim().length < 10} onClick={() => reviewRecording(recordingReviewDraft.recordingId, recordingReviewDraft.decision, recordingReviewDraft.comments)}>Save {recordingReviewDraft.decision === "rejected" ? "decline" : "redo request"}</button></div></div>}</aside>
-          {currentRole === "reviewer" ? <div className="review-decision recommendation-panel"><div><h3>Reviewer recommendation</h3>{reviewRecommendation?.admin_review_status === "returned" && <div className="info-banner"><b>Administrator returned this review</b><p>{reviewRecommendation.admin_feedback}</p></div>}<p>{everyRecordingReviewed ? "All recordings have a decision. Return problem clips directly to the participant, or recommend approval when every clip passes." : `Review every recording first. ${reviewerRecords.filter((record) => !record.review_decision).length} still need a decision.`}</p><label className="return-comment-field"><span>Comments for the participant</span><small>Required when returning recordings. Explain exactly what needs to be corrected.</small><textarea value={reviewComments} onChange={(event) => setReviewComments(event.target.value)} placeholder="For example: Please record the marked clips again in a quieter room." /></label></div><button className="secondary" disabled={!hasRecordingForRedo || reviewComments.trim().length < 10} title={!hasRecordingForRedo ? "Mark at least one recording for redo first" : reviewComments.trim().length < 10 ? "Add a return comment of at least 10 characters" : ""} onClick={returnClipsToParticipant}>Return marked clips to participant</button><button className="primary" disabled={!everyRecordingApproved} title={!everyRecordingApproved ? "Every recording must be approved first" : ""} onClick={() => submitReviewRecommendation("approved")}>Recommend approval to administrator</button></div> : <div className="review-decision"><div><h3>Administrator final decision</h3><p>{reviewRecommendation ? `Reviewer recommendation: ${reviewRecommendation.recommendation.replaceAll("_", " ")}. ${reviewRecommendation.comments || "No reviewer comments."}` : "A reviewer recommendation is required for approval. Full rejection is reserved for serious account-level or consent issues."}</p>{reviewRecommendation?.admin_review_status === "returned" && <p><b>Returned to reviewer:</b> {reviewRecommendation.admin_feedback}</p>}<label className="return-comment-field"><span>Administrator comments</span><small>Required when returning a review or rejecting a submission.</small><textarea value={adminDecisionComments} onChange={(event) => setAdminDecisionComments(event.target.value)} placeholder="Explain what the reviewer must correct or why the full submission is being rejected." /></label></div><button className="secondary" disabled={!reviewRecommendation || reviewRecommendation.admin_review_status === "returned"} title={!reviewRecommendation ? "A reviewer recommendation is required" : reviewRecommendation.admin_review_status === "returned" ? "This review is already back with the reviewer" : "Written feedback is required"} onClick={() => { if (window.confirm(`Return this recommendation to the reviewer assigned to ${selectedReviewSubmission?.participant_id}?`)) returnRecommendationToReviewer(); }}>Return review to reviewer</button><button className="secondary danger-border" title="A written reason is required before rejection" onClick={() => { if (adminDecisionComments.trim().length < 10) { setToast("Add an account-level rejection reason of at least 10 characters."); return; } if (window.confirm(`Reject the entire submission from ${selectedReviewSubmission?.participant_id}? Use this only for an account-level, consent, fraud, or eligibility issue.`)) makeReviewDecision("rejected", adminDecisionComments); }}>Reject entire submission</button><button className="primary" disabled={reviewRecommendation?.recommendation !== "approved" || reviewRecommendation.admin_review_status === "returned"} title={reviewRecommendation?.admin_review_status === "returned" ? "The reviewer must respond to the returned review first" : reviewRecommendation?.recommendation !== "approved" ? "A reviewer approval recommendation is required" : ""} onClick={() => { if (window.confirm(`Give final approval to submission ${selectedReviewId.slice(0, 8)} from ${selectedReviewSubmission?.participant_id}?`)) makeReviewDecision("approved", adminDecisionComments); }}>Final approval</button><button className="primary payment" disabled={selectedReviewSubmission?.status !== "payment_eligible"} onClick={approvePayment}>Process payment</button></div>}
+          {currentRole === "reviewer" ? <div className="review-decision recommendation-panel"><div><h3>Reviewer recommendation</h3>{reviewRecommendation?.admin_review_status === "returned" && <div className="info-banner"><b>Administrator returned this review</b><p>{reviewRecommendation.admin_feedback}</p></div>}<p>{everyRecordingReviewed ? "All recordings have a decision. Return problem clips directly to the participant, or recommend approval when every clip passes." : `Review every recording first. ${reviewerRecords.filter((record) => !record.review_decision).length} still need a decision.`}</p><label className="return-comment-field"><span>Comments for the participant</span><small>Required when returning recordings. Explain exactly what needs to be corrected.</small><textarea value={reviewComments} onChange={(event) => setReviewComments(event.target.value)} placeholder="For example: Please record the marked clips again in a quieter room." /></label></div><button className="secondary" disabled={!hasRecordingForRedo || reviewComments.trim().length < 10} title={!hasRecordingForRedo ? "Mark at least one recording for redo first" : reviewComments.trim().length < 10 ? "Add a return comment of at least 10 characters" : ""} onClick={returnClipsToParticipant}>Return marked clips to participant</button><button className="primary" disabled={!everyRecordingApproved} title={!everyRecordingApproved ? "Every recording must be approved first" : ""} onClick={() => submitReviewRecommendation("approved")}>Recommend approval to administrator</button></div> : <div className="review-decision"><div><h3>Administrator final decision</h3><p>{reviewRecommendation ? `Reviewer recommendation: ${reviewRecommendation.recommendation.replaceAll("_", " ")}. ${reviewRecommendation.comments || "No reviewer comments."}` : "A reviewer recommendation is required for approval. Full rejection is reserved for serious account-level or consent issues."}</p>{reviewRecommendation?.admin_review_status === "returned" && <p><b>Returned to reviewer:</b> {reviewRecommendation.admin_feedback}</p>}<label className="return-comment-field"><span>Administrator comments</span><small>Required when returning a review or rejecting a submission.</small><textarea value={adminDecisionComments} onChange={(event) => setAdminDecisionComments(event.target.value)} placeholder="Explain what the reviewer must correct or why the full submission is being rejected." /></label></div><button className="secondary" disabled={!reviewRecommendation || reviewRecommendation.admin_review_status === "returned"} title={!reviewRecommendation ? "A reviewer recommendation is required" : reviewRecommendation.admin_review_status === "returned" ? "This review is already back with the reviewer" : "Written feedback is required"} onClick={() => { if (window.confirm(`Return this recommendation to the reviewer assigned to ${selectedReviewSubmission?.participant_id}?`)) returnRecommendationToReviewer(); }}>Return review to reviewer</button><button className="secondary danger-border" title="A written reason is required before rejection" onClick={() => { if (adminDecisionComments.trim().length < 10) { setToast("Add an account-level rejection reason of at least 10 characters."); return; } if (window.confirm(`Reject the entire submission from ${selectedReviewSubmission?.participant_id}? Use this only for an account-level, consent, fraud, or eligibility issue.`)) makeReviewDecision("rejected", adminDecisionComments); }}>Reject entire submission</button><button className="primary" disabled={reviewRecommendation?.recommendation !== "approved" || reviewRecommendation.admin_review_status === "returned"} title={reviewRecommendation?.admin_review_status === "returned" ? "The reviewer must respond to the returned review first" : reviewRecommendation?.recommendation !== "approved" ? "A reviewer approval recommendation is required" : ""} onClick={() => { if (window.confirm(`Give final approval to submission ${selectedReviewId.slice(0, 8)} from ${selectedReviewSubmission?.participant_id}?`)) makeReviewDecision("approved", adminDecisionComments); }}>Final approval</button><button className="primary payment" disabled={selectedReviewSubmission?.status !== "payment_eligible" || adminPaymentLoading} onClick={() => void openPaymentDetails()}>{adminPaymentLoading ? "Loading payment..." : "Process payment"}</button></div>}
           </div>
           </div>
           </> : <div className="empty-workspace"><h3>Select a submission</h3><p>Choose an item from the queue to inspect its recordings and review history.</p></div>}
@@ -2293,6 +2372,22 @@ export default function Home() {
         <p>Explain the shared problem once. This comment will be saved against every recording and shown to the participant when returned.</p>
         <textarea autoFocus value={bulkReviewDraft.comments} onChange={(event) => setBulkReviewDraft({ ...bulkReviewDraft, comments: event.target.value })} placeholder="For example: Background noise makes every recording difficult to understand. Please record all prompts again in a quiet room." />
         <div className="review-side-dialog-actions"><button className="secondary" onClick={() => setBulkReviewDraft(null)}>Cancel</button><button className="primary" disabled={bulkReviewDraft.comments.trim().length < 10} onClick={() => void reviewAllRecordings(bulkReviewDraft.decision, bulkReviewDraft.comments)}>Apply to all</button></div>
+      </aside>}
+      {adminPaymentDetail && <aside className="review-side-dialog payment-review-dialog" aria-label="Participant payment details">
+        <div><small>Participant payment</small><button aria-label="Close payment details" onClick={() => setAdminPaymentDetail(null)}>×</button></div>
+        <h3>Pay {adminPaymentDetail.participantName}</h3>
+        <p>Confirm the recipient and amount before sending money. Mark as paid only after a manual transfer succeeds.</p>
+        <div className="payment-detail-grid">
+          <div><small>Amount due</small><b>{adminPaymentDetail.currency} {adminPaymentDetail.amount.toLocaleString()}</b></div>
+          <div><small>Bank</small><b>{adminPaymentDetail.bankName}</b></div>
+          <div><small>Account name</small><b>{adminPaymentDetail.accountName}</b></div>
+          <div><small>Account number</small><b>{adminPaymentDetail.accountNumber || `Only ending ${adminPaymentDetail.accountLast4} is available`}</b></div>
+        </div>
+        {!adminPaymentDetail.accountNumber && <p className="submission-warning">The full number is unavailable for this older record. Use its Paystack recipient below, or ask the participant to submit their payment details again before paying manually.</p>}
+        <div className="payment-methods payment-review-methods">
+          <div><h4>Pay automatically</h4><p>Send through Paystack to the verified recipient.</p><button className="primary" disabled={adminPaymentDetail.provider !== "paystack" || !adminPaymentDetail.verifiedAt || adminPaymentLoading || adminPaymentDetail.status === "processing"} onClick={() => void approvePayment()}>{adminPaymentDetail.status === "processing" ? "Payment processing" : "Pay with Paystack"}</button></div>
+          <div><h4>Record a manual transfer</h4><label><span>Bank or OPay transfer reference</span><input value={adminPaymentReference} onChange={(event) => setAdminPaymentReference(event.target.value)} placeholder="Successful transaction reference" /></label><label className="payment-confirmation"><input type="checkbox" checked={adminPaymentSent} onChange={(event) => setAdminPaymentSent(event.target.checked)} /><span>I confirm that this money has already been sent successfully.</span></label><button className="primary" disabled={!adminPaymentDetail.accountNumber || adminPaymentReference.trim().length < 3 || !adminPaymentSent || adminPaymentLoading} onClick={() => void markSelectedParticipantPaid()}>{adminPaymentLoading ? "Saving..." : "Mark as paid"}</button></div>
+        </div>
       </aside>}
       {toast && <div className="toast">✓ {toast}</div>}
       <footer><span>NaijaVision Research Infrastructure</span><span>Open multilingual contribution platform</span></footer>

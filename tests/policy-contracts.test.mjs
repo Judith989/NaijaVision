@@ -212,7 +212,10 @@ test("participants replace only the individual recordings returned for redo", as
 });
 
 test("administrators inspect payment details before Paystack or manual payment", async () => {
-  const administration = await read("src/app/AdminOperations.tsx");
+  const [administration, reviewWorkspace] = await Promise.all([
+    read("src/app/AdminOperations.tsx"),
+    read("src/app/page.tsx"),
+  ]);
   assert.match(administration, /Open payment/);
   assert.match(administration, /Amount due/);
   assert.match(administration, /Account number/);
@@ -221,6 +224,11 @@ test("administrators inspect payment details before Paystack or manual payment",
   assert.match(administration, /money has already been sent successfully/);
   assert.match(administration, /mark_participant_payment_paid/);
   assert.match(administration, /mark_reviewer_payment_paid/);
+  assert.match(reviewWorkspace, /openPaymentDetails/);
+  assert.match(reviewWorkspace, /list_admin_account_information/);
+  assert.match(reviewWorkspace, /Participant payment details/);
+  assert.match(reviewWorkspace, /Bank or OPay transfer reference/);
+  assert.match(reviewWorkspace, /mark_participant_payment_paid/);
 });
 
 test("recording remains available on ordinary laptop cameras and CPU-only browsers", async () => {
