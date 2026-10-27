@@ -222,3 +222,15 @@ test("administrators inspect payment details before Paystack or manual payment",
   assert.match(administration, /mark_participant_payment_paid/);
   assert.match(administration, /mark_reviewer_payment_paid/);
 });
+
+test("recording remains available on ordinary laptop cameras and CPU-only browsers", async () => {
+  const contribution = await read("src/app/page.tsx");
+  assert.match(contribution, /!window\.isSecureContext \|\| !navigator\.mediaDevices\?\.getUserMedia/);
+  assert.match(contribution, /delegate: "GPU"/);
+  assert.match(contribution, /delegate: "CPU"/);
+  assert.match(contribution, /video\.videoWidth >= 480 && video\.videoHeight >= 360/);
+  assert.match(contribution, /typeof mouthCanvasRef\.current\.captureStream !== "function"/);
+  assert.match(contribution, /new MediaRecorder\(recordingStream, \{ mimeType: preferred \}\)/);
+  assert.match(contribution, /Mouth tracking stopped unexpectedly/);
+  assert.match(contribution, /if \(backendConfigured\) return;[\s\S]*loadClips\(\)/);
+});

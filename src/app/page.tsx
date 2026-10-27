@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
+import { FaceLandmarker, FilesetResolver, type FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 import { corePrompts, safeSpeechPrompts } from "./prompts";
 import { backendConfigured, getCurrentRole, getSupabase } from "./lib/supabase";
 import { sha256, uploadRecording } from "./lib/uploads";
@@ -273,7 +273,16 @@ export default function Home() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingLimitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => { loadClips().then((items) => setClips(items.filter((clip) => clip.metadata?.sessionId === profile.code))).catch(() => undefined); }, [profile.code]);
+  useEffect(() => {
+    // Supabase is authoritative in production. Loading a stale IndexedDB cache
+    // after cloud hydration can otherwise hide already-uploaded recordings.
+    if (backendConfigured) return;
+    let active = true;
+    loadClips()
+      .then((items) => { if (active) setClips(items.filter((clip) => clip.metadata?.sessionId === profile.code)); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [profile.code]);
   useEffect(() => { fetch(`${BASE_PATH}/nigeria-lgas.json`).then((response) => response.json()).then(setLgas).catch(() => setLgas({})); }, []);
   useEffect(() => { queueMicrotask(() => setHasDraft(Boolean(localStorage.getItem("naijavision-contribution-draft")))); }, []);
   useEffect(() => { queueMicrotask(() => { setReportingPromptIssue(false); setPromptIssueText(""); }); }, [promptIndex]);
@@ -1284,11 +1293,18 @@ export default function Home() {
   async function enableDevices() {
     setCameraError("");
     setCalibrationMessage("Requesting camera and microphone access...");
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      setCameraError("Camera recording is unavailable in this browser context. Open the secure NaijaVision website in a current version of Chrome, Edge, Firefox, or Safari.");
+      setCalibrationMessage("A secure browser with camera and microphone support is required.");
+      return;
+    }
+    let requestedMedia: MediaStream | null = null;
     try {
       const media = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 }, facingMode: "user" },
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false, channelCount: 1, sampleRate: { ideal: 48000 } },
       });
+      requestedMedia = media;
       setStream(media);
       if (media.getAudioTracks().length) {
         const audioContext = new AudioContext();
@@ -1304,18 +1320,35 @@ export default function Home() {
 
       setCalibrationMessage("Loading private face-landmark calibration...");
       const vision = await FilesetResolver.forVisionTasks(`${BASE_PATH}/mediapipe-wasm`);
-      faceLandmarkerRef.current = await FaceLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: `${BASE_PATH}/face_landmarker.task`, delegate: "GPU" },
-        runningMode: "VIDEO",
+      const landmarkerOptions = {
+        runningMode: "VIDEO" as const,
         numFaces: 1,
-        minFaceDetectionConfidence: 0.7,
-        minFacePresenceConfidence: 0.7,
-        minTrackingConfidence: 0.7,
-      });
+        minFaceDetectionConfidence: 0.6,
+        minFacePresenceConfidence: 0.6,
+        minTrackingConfidence: 0.6,
+      };
+      try {
+        faceLandmarkerRef.current = await FaceLandmarker.createFromOptions(vision, {
+          ...landmarkerOptions,
+          baseOptions: { modelAssetPath: `${BASE_PATH}/face_landmarker.task`, delegate: "GPU" },
+        });
+      } catch {
+        setCalibrationMessage("GPU calibration is unavailable. Loading the compatible CPU tracker...");
+        faceLandmarkerRef.current = await FaceLandmarker.createFromOptions(vision, {
+          ...landmarkerOptions,
+          baseOptions: { modelAssetPath: `${BASE_PATH}/face_landmarker.task`, delegate: "CPU" },
+        });
+      }
       setCalibrationMessage("Devices connected. Press Run calibration and read the test phrase.");
-    } catch {
+    } catch (error) {
+      requestedMedia?.getTracks().forEach((track) => track.stop());
       mediaTracksOff();
-      setCameraError("Calibration could not start. Allow both camera and microphone access, then retry.");
+      const reason = error instanceof DOMException && error.name === "NotAllowedError"
+        ? "Camera or microphone permission was denied. Allow both permissions in the browser address bar, then retry."
+        : error instanceof DOMException && error.name === "NotFoundError"
+          ? "No usable camera or microphone was found. Connect both devices, then retry."
+          : "Calibration could not start. Reconnect the camera and microphone, refresh the page, and retry.";
+      setCameraError(reason);
       setCalibrationMessage("Both camera and microphone are required.");
     }
   }
@@ -1326,6 +1359,11 @@ export default function Home() {
     calibrationFrameRef.current = null;
     processedAudioNodesRef.current.forEach((node) => node.disconnect());
     processedAudioNodesRef.current = [];
+    void audioContextRef.current?.close().catch(() => undefined);
+    audioContextRef.current = null;
+    analyserRef.current = null;
+    faceLandmarkerRef.current?.close();
+    faceLandmarkerRef.current = null;
     stream?.getTracks().forEach((track) => track.stop());
     processedStreamRef.current?.getTracks().forEach((track) => track.stop());
     processedStreamRef.current = null;
@@ -1339,6 +1377,11 @@ export default function Home() {
 
   async function runCalibration() {
     if (!stream || !faceLandmarkerRef.current || !sourceVideoRef.current || !mouthCanvasRef.current) return;
+    if (typeof mouthCanvasRef.current.captureStream !== "function") {
+      setCameraPassed(false);
+      setCalibrationMessage("This browser cannot create the private mouth-only video stream. Update it or use a current version of Chrome, Edge, or Firefox.");
+      return;
+    }
     const audioTrack = stream.getAudioTracks()[0];
     if (!audioTrack || audioTrack.readyState !== "live" || !analyserRef.current || !audioContextRef.current) {
       setAudioPassed(false);
@@ -1411,7 +1454,18 @@ export default function Home() {
       }
       lastLandmarkAt = frameTime;
 
-      const result = landmarker.detectForVideo(video, frameTime);
+      let result: FaceLandmarkerResult;
+      try {
+        result = landmarker.detectForVideo(video, frameTime);
+      } catch {
+        setCalibrating(false);
+        setCameraPassed(false);
+        setCalibrationMessage("Mouth tracking stopped unexpectedly. Reconnect the camera and run calibration again.");
+        if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+        setRecording(false);
+        calibrationRunRef.current += 1;
+        return;
+      }
       const landmarks = result.faceLandmarks[0];
       const ctx = canvas.getContext("2d");
       if (landmarks && ctx) {
@@ -1430,7 +1484,9 @@ export default function Home() {
         const sourceX = centerX - cropWidth / 2;
         const sourceY = centerY - cropHeight / 2;
         const validCrop = sourceX >= 0 && sourceY >= 0 && sourceX + cropWidth <= video.videoWidth && sourceY + cropHeight <= video.videoHeight;
-        const adequateInput = video.videoWidth >= 720 && lipWidth >= 55 && lipHeight >= 18;
+        // Many otherwise usable laptop webcams negotiate 640×480. The mouth
+        // crop is normalized to 512×256, so 480p input remains useful.
+        const adequateInput = video.videoWidth >= 480 && video.videoHeight >= 360 && lipWidth >= 38 && lipHeight >= 12;
         const frontal = Math.abs(landmarks[33].z - landmarks[263].z) < 0.035;
         if (validCrop && adequateInput && frontal) {
           trackingMisses = 0;
@@ -1583,7 +1639,7 @@ export default function Home() {
         } else if (!lightOk) {
           setCalibrationMessage("Lighting test failed. Add soft front lighting or move away from harsh direct light.");
         } else if (!faceOk) {
-          setCalibrationMessage("Camera test failed: use at least 720p, face forward, move closer, and keep your mouth unobstructed.");
+          setCalibrationMessage("Camera test failed: use at least 480p, face forward, move closer, and keep your mouth unobstructed.");
         }
         return;
       }
@@ -1595,6 +1651,10 @@ export default function Home() {
   function beginRecording() {
     const recordingStream = processedStreamRef.current;
     if (!recordingStream || !cameraPassed || !audioPassed || !lightingPassed) return;
+    if (typeof MediaRecorder === "undefined") {
+      setToast("This browser does not support in-browser recording. Update the browser or use a current version of Chrome, Edge, Firefox, or Safari.");
+      return;
+    }
     const preferred = [
       "video/webm;codecs=vp8,opus",
       "video/webm;codecs=vp9,opus",
@@ -1607,7 +1667,17 @@ export default function Home() {
       setToast("This browser cannot create a supported video file. Update the browser or try Chrome, Edge, or Safari.");
       return;
     }
-    const recorder = new MediaRecorder(recordingStream, { mimeType: preferred, videoBitsPerSecond: 900_000, audioBitsPerSecond: 96_000 });
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(recordingStream, { mimeType: preferred, videoBitsPerSecond: 900_000, audioBitsPerSecond: 96_000 });
+    } catch {
+      try {
+        recorder = new MediaRecorder(recordingStream, { mimeType: preferred });
+      } catch {
+        setToast("The browser could not start the video recorder. Reconnect the camera and microphone, refresh the page, or try Chrome or Edge.");
+        return;
+      }
+    }
     chunksRef.current = [];
     recorder.ondataavailable = (event) => event.data.size && chunksRef.current.push(event.data);
     recorder.onstop = () => {
@@ -1626,7 +1696,12 @@ export default function Home() {
       if (recordingLimitRef.current) clearTimeout(recordingLimitRef.current);
       setToast("Recording stopped because the browser reported a media error. Reconnect the camera and microphone, then try again.");
     };
-    recorder.start(2000);
+    try {
+      recorder.start(1000);
+    } catch {
+      setToast("The recorder could not start. Reconnect the camera and microphone, then run calibration again.");
+      return;
+    }
     recorderRef.current = recorder;
     startedRef.current = Date.now();
     setElapsed(0);
@@ -2037,7 +2112,7 @@ export default function Home() {
               {[
                 ["Camera access", stream?.getVideoTracks().length ? "Connected" : "Waiting", !!stream?.getVideoTracks().length],
                 ["Microphone access", stream?.getAudioTracks().length ? "Connected" : "Waiting", !!stream?.getAudioTracks().length],
-                ["Mouth crop", cameraPassed ? "Face forward, 720p input, lips tracked" : "Not yet passed", cameraPassed],
+                ["Mouth crop", cameraPassed ? "Face forward, 480p or better input, lips tracked" : "Not yet passed", cameraPassed],
                 ["Microphone check", audioPassed ? "Live microphone track is ready" : "Allow microphone access and check that a microphone is connected", audioPassed],
                 ["Lighting", lightingPassed ? `Lighting is ready at ${lightLevel}` : lightLevel < MIN_LIGHT_LEVEL ? `Brightness ${lightLevel}. Add a little light in front of you.` : `Brightness ${lightLevel}. Reduce harsh direct light.`, lightingPassed],
                ].map(([label, value, ok]) => <div className="device-check" key={String(label)}><span className={ok ? "ok" : ""}>{ok ? "✓" : "·"}</span><div><b>{label}</b><small>{value}</small></div></div>)}
