@@ -266,6 +266,9 @@ test("administrator reporting retains completed submissions and payment history"
   assert.match(administration, /Every payment remains visible after completion/);
   assert.match(reviewWorkspace, /Submission tally by language category/);
   assert.match(reviewWorkspace, /Approved and paid submissions/);
+  assert.match(reviewWorkspace, /Corrections \/ returned/);
+  assert.match(reviewWorkspace, /adminCorrectionQueue/);
+  assert.match(reviewWorkspace, /adminRecommendedQueue\.length} \+ {adminPaymentQueue\.length} \+ {adminReviewerWorkQueue\.length} \+ {adminCorrectionQueue\.length/);
   assert.match(reviewWorkspace, /"approved", "payment_eligible", "payment_processing", "paid"/);
 });
 
