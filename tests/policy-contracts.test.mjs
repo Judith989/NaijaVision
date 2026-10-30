@@ -234,6 +234,20 @@ test("administrators inspect payment details before Paystack or manual payment",
   assert.match(administration, /markReviewerPaymentPaid/);
 });
 
+test("administrator reporting retains completed submissions and payment history", async () => {
+  const [administration, reviewWorkspace] = await Promise.all([
+    read("src/app/AdminOperations.tsx"),
+    read("src/app/page.tsx"),
+  ]);
+  assert.match(administration, /Complete payment history/);
+  assert.match(administration, /Total still to pay/);
+  assert.match(administration, /Total paid/);
+  assert.match(administration, /Every payment remains visible after completion/);
+  assert.match(reviewWorkspace, /Submission tally by language category/);
+  assert.match(reviewWorkspace, /Approved and paid submissions/);
+  assert.match(reviewWorkspace, /"approved", "payment_eligible", "payment_processing", "paid"/);
+});
+
 test("recording remains available on ordinary laptop cameras and CPU-only browsers", async () => {
   const contribution = await read("src/app/page.tsx");
   assert.match(contribution, /!window\.isSecureContext \|\| !navigator\.mediaDevices\?\.getUserMedia/);
