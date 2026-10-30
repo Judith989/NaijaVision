@@ -293,12 +293,31 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
       return;
     }
     if (!window.confirm(`Restore ${participantName}'s rejected submission and reopen its approval decision? The cancelled payment will remain unavailable until final approval.`)) return;
-    const { error } = await getSupabase()!.rpc("restore_rejected_submission", {
+    const restore = (withdrawEmptySuccessor: boolean) => getSupabase()!.rpc("restore_rejected_submission", {
       p_submission_id: submissionId,
       p_reason: reason.trim(),
+      p_withdraw_empty_successor: withdrawEmptySuccessor,
     });
+    let { error } = await restore(false);
+    if (error?.message.includes("RESTORE_CONFIRM_EMPTY_SUCCESSOR:")) {
+      const emptySubmissionId = error.message.split("RESTORE_CONFIRM_EMPTY_SUCCESSOR:")[1]?.split(/[\s\n]/)[0] || "unknown";
+      if (!window.confirm(`This participant has a newer EMPTY submission (${emptySubmissionId.slice(0, 8)}) with zero recordings. Withdraw that empty draft and restore the original reviewed submission?`)) return;
+      ({ error } = await restore(true));
+    }
+    if (error?.message.includes("RESTORE_BLOCKED_RECORDED_SUCCESSOR:")) {
+      const details = error.message.split("RESTORE_BLOCKED_RECORDED_SUCCESSOR:")[1]?.split(/[\s\n]/)[0]?.split(":") || [];
+      const warning = `Restore blocked: the newer submission ${String(details[0] || "").slice(0, 8)} contains ${details[1] || "one or more"} saved recordings. Nothing was changed.`;
+      setMessage(warning);
+      window.alert(warning);
+      return;
+    }
     setMessage(error ? error.message : "Submission restored to the administrator approval queue. The participant and assigned reviewer were notified.");
-    if (!error) refresh();
+    if (error) {
+      window.alert(`Submission was not restored: ${error.message}`);
+      return;
+    }
+    window.alert("Submission restored. The participant and assigned reviewer were notified, and it is back in the administrator approval queue.");
+    refresh();
   }
 
   function openPayment(kind: "participant" | "reviewer", row: Row, name: string) {

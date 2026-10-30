@@ -270,8 +270,9 @@ test("administrator reporting retains completed submissions and payment history"
 });
 
 test("administrators can safely restore a rejected submission without prematurely paying its reviewer", async () => {
-  const [migration, operations] = await Promise.all([
+  const [migration, successorMigration, operations] = await Promise.all([
     read("supabase/migrations/202610300002_restore_rejected_submission.sql"),
+    read("supabase/migrations/202610300003_restore_with_empty_successor.sql"),
     read("src/app/AdminOperations.tsx"),
   ]);
   assert.match(migration, /create or replace function public\.restore_rejected_submission/);
@@ -282,6 +283,11 @@ test("administrators can safely restore a rejected submission without prematurel
   assert.match(migration, /submission\.restored/);
   assert.match(operations, /Restore submission/);
   assert.match(operations, /restore_rejected_submission/);
+  assert.match(successorMigration, /p_withdraw_empty_successor boolean/);
+  assert.match(successorMigration, /RESTORE_CONFIRM_EMPTY_SUCCESSOR/);
+  assert.match(successorMigration, /RESTORE_BLOCKED_RECORDED_SUCCESSOR/);
+  assert.match(successorMigration, /recording_count', 0/);
+  assert.match(operations, /newer EMPTY submission/);
 });
 
 test("recording remains available on ordinary laptop cameras and CPU-only browsers", async () => {
