@@ -132,6 +132,9 @@ test("reviewers can privately notify only participants they review", async () =>
 test("participant forms distinguish required and optional information", async () => {
   const contribution = await read("src/app/page.tsx");
   assert.match(contribution, /required-badge/);
+  assert.match(contribution, /naijasafe-card/);
+  assert.match(contribution, /Select NaijaSafeSpeech/);
+  assert.match(contribution, /entirely optional/);
   assert.match(contribution, /Camera resolution <small>optional · only if known<\/small>/);
   assert.match(contribution, /Device brand <small>optional<\/small>/);
   assert.doesNotMatch(contribution.match(/const requiredAnswers = \[[\s\S]*?\];/)?.[0] || "", /cameraResolution|deviceBrand/);

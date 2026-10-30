@@ -2149,9 +2149,9 @@ export default function Home() {
               </label>
             ))}
           </div>
-          <label className="optional-card">
-            <div><b>Optional: NaijaSafeSpeech</b><small>A separately identified set of performed hate-speech prompts. These are scripted examples, not your own words, and are used to train hate-speech detection. You may contribute to NaijaVSR without selecting this option.</small></div>
-            <input type="checkbox" checked={harmful} onChange={(e) => setHarmful(e.target.checked)} /><span className="switch" />
+          <label className={`optional-card naijasafe-card ${harmful ? "selected" : ""}`}>
+            <div><span className="naijasafe-badge">Optional additional recording set</span><b>Add NaijaSafeSpeech recordings</b><strong>Earn an additional ₦750 for each completed NaijaSafeSpeech language set.</strong><small>These are clearly marked, scripted hate-speech research examples—not your own words or opinions. Selecting this is entirely optional and you may still participate in NaijaVSR without it.</small></div>
+            <span className="naijasafe-choice"><span>{harmful ? "Selected ✓" : "Select NaijaSafeSpeech"}</span><input type="checkbox" checked={harmful} onChange={(e) => setHarmful(e.target.checked)} /><span className="switch" /></span>
           </label>
           <div className="footer-actions"><button className="secondary" onClick={() => setStep("study")}>Back</button><button className="primary" disabled={!consentReady} onClick={() => setStep("profile")}>Provide consent and continue <span>→</span></button></div>
         </section>
