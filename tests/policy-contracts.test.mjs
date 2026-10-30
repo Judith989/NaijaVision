@@ -269,6 +269,21 @@ test("administrator reporting retains completed submissions and payment history"
   assert.match(reviewWorkspace, /"approved", "payment_eligible", "payment_processing", "paid"/);
 });
 
+test("administrators can safely restore a rejected submission without prematurely paying its reviewer", async () => {
+  const [migration, operations] = await Promise.all([
+    read("supabase/migrations/202610300002_restore_rejected_submission.sql"),
+    read("src/app/AdminOperations.tsx"),
+  ]);
+  assert.match(migration, /create or replace function public\.restore_rejected_submission/);
+  assert.match(migration, /Only a rejected submission can be restored/);
+  assert.match(migration, /status = 'automated_qc'/);
+  assert.match(migration, /status = 'not_eligible'/);
+  assert.doesNotMatch(migration, /update public\.reviewer_payments set status = 'eligible'/);
+  assert.match(migration, /submission\.restored/);
+  assert.match(operations, /Restore submission/);
+  assert.match(operations, /restore_rejected_submission/);
+});
+
 test("recording remains available on ordinary laptop cameras and CPU-only browsers", async () => {
   const contribution = await read("src/app/page.tsx");
   assert.match(contribution, /!window\.isSecureContext \|\| !navigator\.mediaDevices\?\.getUserMedia/);

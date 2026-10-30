@@ -71,6 +71,7 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
   const [releaseVersion, setReleaseVersion] = useState("");
   const [staffMembers, setStaffMembers] = useState<Row[]>([]);
   const [pendingSubmissions, setPendingSubmissions] = useState<Row[]>([]);
+  const [allSubmissions, setAllSubmissions] = useState<Row[]>([]);
   const [reviewerAssignments, setReviewerAssignments] = useState<Record<string, string>>({});
   const [activePolicy, setActivePolicy] = useState<Row | null>(null);
   const [participantQuery, setParticipantQuery] = useState("");
@@ -95,7 +96,7 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
     if (!supabase) return;
     setAssignmentsLoading(true);
     setAssignmentError("");
-    const [withdrawalResult, riskResult, paymentResult, reviewerPaymentResult, reviewerPolicyResult, auditResult, releaseResult, staffMemberResult, submissionResult, policyResult, pendingAccountResult, accountDirectoryResult, adminMessageResult] = await Promise.all([
+    const [withdrawalResult, riskResult, paymentResult, reviewerPaymentResult, reviewerPolicyResult, auditResult, releaseResult, staffMemberResult, submissionResult, allSubmissionResult, policyResult, pendingAccountResult, accountDirectoryResult, adminMessageResult] = await Promise.all([
       supabase.from("withdrawal_requests").select("*").in("status", ["requested", "processing"]).order("requested_at"),
       supabase.from("risk_flags").select("*").eq("status", "open").order("score", { ascending: false }),
       supabase.from("payments").select("id,submission_id,user_id,amount,currency,status,provider,provider_transaction_reference,processed_at,created_at,payout_accounts(bank_name,account_name,account_last4,verified_at,provider),submissions(participant_id)").order("created_at", { ascending: false }),
@@ -105,6 +106,7 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
       supabase.from("dataset_releases").select("*").order("created_at", { ascending: false }),
       supabase.from("profiles").select("user_id,display_name,participant_id,role,account_status,updated_at").in("role", ["reviewer", "admin"]).order("role").order("display_name"),
       supabase.from("submissions").select("id,user_id,participant_id,status,expected_recordings,assigned_reviewer_id,created_at,recordings(language,prompt_assignments(prompt_id))").in("status", ["automated_qc", "awaiting_review", "resubmitted"]).order("created_at"),
+      supabase.from("submissions").select("id,user_id,participant_id,status,expected_recordings,assigned_reviewer_id,created_at,updated_at,submitted_at,reviewed_at,paid_at,recordings(id)").order("created_at", { ascending: false }),
       supabase.from("compensation_policies").select("id,amount,currency,pricing_basis,effective_at").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle(),
       supabase.rpc("list_verified_pending_accounts"),
       supabase.rpc("list_admin_account_information"),
@@ -123,11 +125,12 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
     setReleases(releaseResult.data || []);
     setStaffMembers(await withSelectedLanguages(staffMemberResult.data || []));
     setPendingSubmissions((submissionResult.data || []) as unknown as Row[]);
+    setAllSubmissions((allSubmissionResult.data || []) as unknown as Row[]);
     setActivePolicy(policyResult.data || null);
     setPendingAccounts(pendingAccountResult.data || []);
     setAccountDirectory(accountDirectoryResult.data || []);
     setAdminMessageReplies(adminMessageResult.data || []);
-    setAssignmentError(submissionResult.error?.message || staffMemberResult.error?.message || "");
+    setAssignmentError(submissionResult.error?.message || allSubmissionResult.error?.message || staffMemberResult.error?.message || "");
     setAssignmentsLoading(false);
   }
 
@@ -280,6 +283,22 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
       setSelectedPayment(null);
       refresh();
     }
+  }
+
+  async function restoreRejectedSubmission(submissionId: string, participantName: string) {
+    const reason = window.prompt(`Explain why the rejected submission for ${participantName} should be restored to the administrator approval queue.`);
+    if (reason === null) return;
+    if (reason.trim().length < 10) {
+      setMessage("Enter a restoration reason of at least 10 characters.");
+      return;
+    }
+    if (!window.confirm(`Restore ${participantName}'s rejected submission and reopen its approval decision? The cancelled payment will remain unavailable until final approval.`)) return;
+    const { error } = await getSupabase()!.rpc("restore_rejected_submission", {
+      p_submission_id: submissionId,
+      p_reason: reason.trim(),
+    });
+    setMessage(error ? error.message : "Submission restored to the administrator approval queue. The participant and assigned reviewer were notified.");
+    if (!error) refresh();
   }
 
   function openPayment(kind: "participant" | "reviewer", row: Row, name: string) {
@@ -449,13 +468,14 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
       <div className="payment-methods"><div><h4>Pay with Paystack</h4><p>Send to the verified recipient using your funded Paystack balance.</p><button className="primary" disabled={!selectedPaymentCanUsePaystack || paymentSaving || selectedPayment.row.status === "processing"} onClick={() => void processReviewerPayment(String(selectedPayment.row.id))}>{selectedPayment.row.status === "processing" ? "Payment processing" : paymentSaving ? "Starting payment..." : "Pay with Paystack"}</button>{!selectedPaymentCanUsePaystack && <small>Automatic transfer unavailable: this is not a Paystack-verified recipient.</small>}</div><div><h4>Record a manual transfer</h4><p>Transfer the exact amount using your bank or OPay app, then enter the successful reference.</p><label><span>Transfer reference</span><input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} placeholder="Successful bank or OPay reference" /></label><label className="payment-confirmation"><input type="checkbox" checked={paymentSentConfirmed} onChange={(event) => setPaymentSentConfirmed(event.target.checked)} /><span>I confirm that the reviewer has already been paid successfully.</span></label><button className="primary" disabled={!selectedPaymentAccountNumber || paymentReference.trim().length < 3 || !paymentSentConfirmed || paymentSaving} onClick={() => void markReviewerPaymentPaid(String(selectedPayment.row.id), paymentReference)}>{paymentSaving ? "Saving..." : "Mark as paid"}</button></div></div>
     </div>}
     <div className="ops-card wide-ops-card"><div className="section-head"><div><h3 id="reviewer-payment-queue-heading">Reviewer payments awaiting action</h3><p className="ops-hint">Open an entry to inspect the destination, pay, or mark a completed transfer paid.</p></div><span className="status needs-review">{reviewerPaymentsAwaitingAction.length} pending</span></div>{reviewerPaymentsAwaitingAction.length ? reviewerPaymentsAwaitingAction.map((row) => { const reviewer = staffMembers.find((member) => member.user_id === row.reviewer_id); const account = related(row, "payout_accounts"); const reviewerName = String(reviewer?.display_name || reviewer?.participant_id || "Reviewer"); return <div className="ops-row payment-queue-row" key={String(row.id)}><span><b>{reviewerName}</b><small>{String(row.reviewed_video_count)} videos × {String(row.rate_per_video)} {String(row.currency)} = {String(row.amount)} {String(row.currency)} | {paymentStatusLabel(row.status)}</small><small>{account.bank_name ? `${String(account.bank_name)} | ${String(account.account_name || "Account name unavailable")} | ending ${String(account.account_last4 || "----")}` : "No reviewer payment destination"}</small></span><button onClick={() => openPayment("reviewer", row, reviewerName)}>Open payment</button></div>; }) : <p>No reviewer payments currently require action.</p>}</div>
-    <div className="ops-card wide-ops-card"><div className="section-head"><div><h3>Complete payment history</h3><p className="ops-hint">Participant and reviewer payments remain here after they are paid, failed, cancelled, or completed.</p></div></div>{allPayments.length ? allPayments.map((item) => <div className="ops-row payment-history-row" key={`${item.kind}-${String(item.row.id)}`}><span><b>{item.name}</b><small>{item.kind} · {money(item.row)} · {paymentStatusLabel(item.row.status)}</small><small>{item.row.provider_transaction_reference ? `Reference: ${String(item.row.provider_transaction_reference)}` : "No payment reference recorded"} · {new Date(String(item.row.processed_at || item.row.paid_at || item.row.created_at)).toLocaleString()}</small></span><span className={`status ${item.row.status === "paid" ? "accepted" : item.row.status === "failed" ? "rejected" : "needs-review"}`}>{paymentStatusLabel(item.row.status)}</span></div>) : <p>No payment records yet.</p>}</div>
+    <div className="ops-card wide-ops-card"><div className="section-head"><div><h3>Complete payment history</h3><p className="ops-hint">Participant and reviewer payments remain here after they are paid, failed, cancelled, or completed. A cancelled reviewer payment automatically becomes eligible again only after its participant submission receives final approval.</p></div></div>{allPayments.length ? allPayments.map((item) => <div className="ops-row payment-history-row" key={`${item.kind}-${String(item.row.id)}`}><span><b>{item.name}</b><small>{item.kind} · {money(item.row)} · {paymentStatusLabel(item.row.status)}</small><small>{item.row.provider_transaction_reference ? `Reference: ${String(item.row.provider_transaction_reference)}` : "No payment reference recorded"} · {new Date(String(item.row.processed_at || item.row.paid_at || item.row.created_at)).toLocaleString()}</small>{item.kind === "Reviewer" && item.row.status === "cancelled" && <small>Automatically cancelled because the participant submission has not received final approval.</small>}</span><span className={`status ${item.row.status === "paid" ? "accepted" : item.row.status === "failed" ? "rejected" : "needs-review"}`}>{paymentStatusLabel(item.row.status)}</span>{item.kind === "Participant" && item.row.status === "cancelled" && <button className="secondary" onClick={() => void restoreRejectedSubmission(String(item.row.submission_id), item.name)}>Restore submission</button>}</div>) : <p>No payment records yet.</p>}</div>
   </section>;
 
   return <section className="admin-operations" id="staff-management">
     <div className="section-head"><div><div className="eyebrow">Administrator controls</div><h2>Operations and governance</h2></div></div>
     {message && <p className="auth-message">{message}</p>}
     <div className="metric-grid"><div><span>Account requests</span><b>{pendingAccounts.length}</b><small>New accounts awaiting approval</small></div><div><span>Pending reviews</span><b>{pendingSubmissions.length}</b><small>Submissions requiring assignment or action</small></div><div><span>Total still to pay</span><b>₦{totalToPay.toLocaleString()}</b><small>Eligible and failed payments</small></div><div><span>Processing</span><b>₦{totalProcessing.toLocaleString()}</b><small>Transfers currently in progress</small></div><div><span>Total paid</span><b>₦{totalPaid.toLocaleString()}</b><small>Participant and reviewer payments</small></div></div>
+    <div className="ops-card wide-ops-card"><div className="section-head"><div><h3>All participant submissions</h3><p className="ops-hint">Every submission is shown here, including empty drafts and recording-stage work that does not yet appear in the reviewer or approval queues.</p></div><span className="status needs-review">{allSubmissions.length} total</span></div>{allSubmissions.length ? allSubmissions.map((row) => { const assigned = staffMembers.find((member) => member.user_id === row.assigned_reviewer_id); const recordingCount = Array.isArray(row.recordings) ? row.recordings.length : 0; return <div className="ops-row payment-history-row" key={String(row.id)}><span><b>{String(row.participant_id)} · {String(row.status).replaceAll("_", " ")}</b><small>Submission {String(row.id).slice(0, 8)} · {recordingCount} saved recording{recordingCount === 1 ? "" : "s"} · target {String(row.expected_recordings)}</small><small>Created {new Date(String(row.created_at)).toLocaleString()} · Updated {new Date(String(row.updated_at || row.created_at)).toLocaleString()} · Reviewer: {String(assigned?.display_name || assigned?.participant_id || "Not assigned")}</small></span><span className={`status ${row.status === "paid" ? "accepted" : row.status === "rejected" ? "rejected" : "needs-review"}`}>{String(row.status).replaceAll("_", " ")}</span></div>; }) : <p>No submissions exist yet.</p>}</div>
     <div className="ops-grid">
       {selectedPayment && <div className="ops-card wide-ops-card payment-detail-panel">
         <div className="section-head"><div><div className="eyebrow">{selectedPayment.kind === "participant" ? "Participant" : "Reviewer"} payment</div><h3>Pay {selectedPayment.name}</h3><p className="ops-hint">Check the recipient and amount first. Mark this paid only after the transfer has actually succeeded.</p></div><button onClick={() => setSelectedPayment(null)}>Close</button></div>
