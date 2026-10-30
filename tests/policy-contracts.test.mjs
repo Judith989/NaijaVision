@@ -111,6 +111,24 @@ test("assigned reviewers can return marked clips directly to participants", asyn
   assert.match(directRedo, /'Recordings need to be redone'/);
 });
 
+test("reviewers can privately notify only participants they review", async () => {
+  const [migration, workspace, dashboard] = await Promise.all([
+    read("supabase/migrations/202610300001_reviewer_participant_messages.sql"),
+    read("src/app/page.tsx"),
+    read("src/app/dashboard/page.tsx"),
+  ]);
+  assert.match(migration, /create or replace function public\.send_reviewer_message/);
+  assert.match(migration, /assigned_reviewer_id is distinct from auth\.uid\(\) and not v_has_review_history/);
+  assert.match(migration, /r\.reviewer_id = auth\.uid\(\)/);
+  assert.match(migration, /sr\.reviewer_id = auth\.uid\(\)/);
+  assert.match(migration, /insert into public\.notifications/);
+  assert.match(migration, /'reviewer_message'/);
+  assert.match(workspace, /Message this participant/);
+  assert.match(workspace, /send_reviewer_message/);
+  assert.match(workspace, /participant received a dashboard notification/);
+  assert.match(dashboard, /notifications/);
+});
+
 test("participant forms distinguish required and optional information", async () => {
   const contribution = await read("src/app/page.tsx");
   assert.match(contribution, /required-badge/);
