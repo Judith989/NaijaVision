@@ -11,8 +11,21 @@ test('notification emails link to the dashboard without exposing private comment
   assert.deepEqual(email.to, ['participant@example.com']);
   assert.ok(email.text.includes('https://naijavision.vercel.app/dashboard'));
   assert.ok(!email.text.includes('Private review feedback'));
+  assert.ok(email.html.includes('Open your dashboard'));
+  assert.ok(email.html.includes('href="https://naijavision.vercel.app/dashboard"'));
+  assert.ok(email.html.includes('NaijaVision Team'));
+  assert.ok(!email.html.includes('Private review feedback'));
   assert.ok(!/[\r\n]/.test(email.subject));
   assert.throws(() => buildEmail({ title: 'Update' }, 'x@example.com', { dashboardUrl: 'javascript:alert(1)' }));
+});
+
+test('HTML notification titles escape markup', () => {
+  const email = buildEmail({ title: '<img src=x onerror="alert(1)"> & update' }, 'x@example.com', {
+    dashboardUrl: 'https://naijavision.vercel.app/dashboard',
+  });
+  assert.ok(!email.html.includes('<img'));
+  assert.ok(email.html.includes('&lt;img'));
+  assert.ok(email.html.includes('&amp; update'));
 });
 
 test('temporary failures retry, permanent failures stop, and retries are bounded', () => {
