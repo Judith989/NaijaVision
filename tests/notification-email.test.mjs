@@ -5,11 +5,11 @@ import { buildEmail, retryOutcome } from '../supabase/functions/send-notificatio
 test('notification emails link to the dashboard without exposing private comments', () => {
   const email = buildEmail({ title: 'Recordings need corrections\r\n', message: 'Private review feedback' }, 'participant@example.com', {
     from: 'NaijaVision <notifications@example.com>', replyTo: 'naijavisionresearch@gmail.com',
-    dashboardUrl: 'https://judith989.github.io/NaijaVision/dashboard/',
+    dashboardUrl: 'https://naijavision.vercel.app/dashboard',
   });
   assert.equal(email.replyTo, 'naijavisionresearch@gmail.com');
   assert.deepEqual(email.to, ['participant@example.com']);
-  assert.ok(email.text.includes('/NaijaVision/dashboard/'));
+  assert.ok(email.text.includes('https://naijavision.vercel.app/dashboard'));
   assert.ok(!email.text.includes('Private review feedback'));
   assert.ok(!/[\r\n]/.test(email.subject));
   assert.throws(() => buildEmail({ title: 'Update' }, 'x@example.com', { dashboardUrl: 'javascript:alert(1)' }));

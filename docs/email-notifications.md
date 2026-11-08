@@ -13,7 +13,7 @@ Existing dashboard notifications are queued atomically. Additional database trig
 ## Deployment
 
 1. Set `SMTP_PASSWORD` in Supabase Edge Function secrets using a Gmail app password for the sender account. Do not change the working Auth SMTP password. Never place credentials in client variables, source, screenshots or chat.
-2. Set `NOTIFICATION_WORKER_SECRET` to a random 32-byte server-only secret. Optional overrides: `SMTP_USERNAME` and `NOTIFICATION_DASHBOARD_URL`. Defaults are the sender above and `https://judith989.github.io/NaijaVision/dashboard/`.
+2. Set `NOTIFICATION_WORKER_SECRET` to a random 32-byte server-only secret. Optional overrides: `SMTP_USERNAME` and `NOTIFICATION_DASHBOARD_URL`. Defaults are the sender above and `https://naijavision.vercel.app/dashboard`.
 3. Apply `supabase/migrations/202611050001_email_notifications.sql` once to the target database.
 4. Deploy `send-notification-emails`. It requires the `x-notification-secret` header, checks it before processing, and rejects non-POST requests. Gateway JWT checking is disabled for this scheduler-only endpoint.
 5. Enable pg_cron and pg_net. Store `notification_project_url` and `notification_worker_secret` in Supabase Vault. The latter must match the Edge Function secret. Run `supabase/setup/notification-email-cron.sql`.

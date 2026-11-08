@@ -47,7 +47,7 @@ Deno.serve(async (request: Request) => {
       }
       const payload = job.payload || buildEmail(job, user.email, {
         from: `NaijaVision <${username}>`, replyTo: username,
-        dashboardUrl: Deno.env.get('NOTIFICATION_DASHBOARD_URL') || 'https://judith989.github.io/NaijaVision/dashboard/',
+        dashboardUrl: Deno.env.get('NOTIFICATION_DASHBOARD_URL') || 'https://naijavision.vercel.app/dashboard',
       });
       await save({ payload, status: 'sending' });
       sendingStarted = true;
