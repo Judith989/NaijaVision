@@ -9,6 +9,7 @@ import { backendConfigured, getCurrentRole, getSupabase } from "./lib/supabase";
 import { sha256, uploadRecording } from "./lib/uploads";
 import { AdminOperations } from "./AdminOperations";
 import { recordedCategories, type CategoryRecording } from "./lib/recordedCategories";
+import { groupReturnedFeedback } from "./lib/returnedFeedback";
 import { BASE_PATH } from "./lib/basePath";
 import { adminReviewStatuses, reviewWorkStatuses, reviewStage, reviewStageLabel } from "./lib/reviewWorkflow";
 
@@ -735,7 +736,7 @@ export default function Home() {
       const legacyFallbackIds = typedRows.map(joinedPromptId).filter(Boolean);
       setRedoPromptIds(redoIds.length ? redoIds : legacyFallbackIds);
       const commentsByPrompt: Record<string, string> = {};
-      for (const review of (reviewRows || []) as RecordingReviewRow[]) {
+      for (const review of groupReturnedFeedback((reviewRows || []) as RecordingReviewRow[])) {
         const recording = typedRows.find((row) => row.id === review.recording_id);
         const promptId = recording ? joinedPromptId(recording) : "";
         if (promptId && review.comments) commentsByPrompt[promptId] = review.comments;
