@@ -339,13 +339,18 @@ export default function Home() {
       const role = await getCurrentRole();
       setCurrentRole(role);
       if (requestedMode.get("contribute") === "1") {
-        const { data: latestSubmission } = await supabase
+        let contributionQuery = supabase
           .from("submissions")
           .select("id,status,survey_id,consent_id,accepted_recordings,compensation_amount,compensation_currency,completed_language_count,completed_standard_language_count,completed_safe_speech_language_count")
-          .eq("user_id", data.user.id)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .eq("user_id", data.user.id);
+        const requestedSubmissionId = requestedMode.get("submission");
+        if (requestedSubmissionId) contributionQuery = contributionQuery.eq("id", requestedSubmissionId);
+        const { data: latestSubmission, error: contributionError } = await contributionQuery.order("created_at", { ascending: false }).limit(1).maybeSingle();
+        if (contributionError || (requestedSubmissionId && !latestSubmission)) {
+          setToast("This contribution could not be loaded. Open your dashboard and try again.");
+          setStep("welcome");
+          return;
+        }
         const resumableStatuses = ["draft", "recording", "uploading", "changes_requested", "resubmitted"];
         const activeSubmission = latestSubmission && resumableStatuses.includes(latestSubmission.status) ? latestSubmission : null;
         if (latestSubmission) setEarnedCompensation({ amount: Number(latestSubmission.compensation_amount || 0), currency: latestSubmission.compensation_currency || "NGN", completedLanguages: Number(latestSubmission.completed_language_count || 0), standardLanguages: Number(latestSubmission.completed_standard_language_count || 0), safeSpeechLanguages: Number(latestSubmission.completed_safe_speech_language_count || 0) });
