@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getCurrentRole, getSupabase } from "../lib/supabase";
@@ -126,13 +126,14 @@ export default function DashboardPage() {
   }
   const returnedSubmissions = submissions.filter((item) => item.status === "changes_requested");
   const latest = returnedSubmissions[0] || submissions[0];
-  const latestRecordings = useMemo(() => latest ? recordings.filter((item) => item.submission_id === latest.id) : [], [latest, recordings]);
+  const latestSubmissionId = latest?.id;
+  const latestRecordings = latestSubmissionId ? recordings.filter((item) => item.submission_id === latestSubmissionId) : [];
   const target = latest?.expected_recordings || policy?.minimum_accepted_recordings || 75;
   const completed = latestRecordings.length;
   const progress = Math.min(100, Math.round((completed / target) * 100));
   const estimatedMinutes = Math.max(0, Math.ceil((target - completed) * 0.45));
   const latestPayment = latest ? payments.find((item) => item.submission_id === latest.id) : undefined;
-  const languages = useMemo(() => Array.from(new Set([...surveyLanguages(survey), ...latestRecordings.map((item) => item.language)])), [survey, latestRecordings]);
+  const languages = Array.from(new Set([...surveyLanguages(survey), ...latestRecordings.map((item) => item.language)]));
   const displayedCompensation = latest?.compensation_amount ?? 0;
   const reviewerVideoCount = reviewerPayments.reduce((total, item) => total + item.reviewed_video_count, 0);
   const reviewerEarnings = reviewerPayments.reduce((total, item) => total + item.amount, 0);
