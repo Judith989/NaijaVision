@@ -237,6 +237,11 @@ export default function Home() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [qualityConfirm, setQualityConfirm] = useState<string[]>([]);
   const [toast, setToast] = useState("");
+  useEffect(() => {
+    if (!toast) return;
+    const timeout = window.setTimeout(() => setToast(""), 6000);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
   const [reportingPromptIssue, setReportingPromptIssue] = useState(false);
   const [promptIssueText, setPromptIssueText] = useState("");
   const [promptIssueSending, setPromptIssueSending] = useState(false);
@@ -888,7 +893,6 @@ export default function Home() {
       if (error) {
         setPromptIssueSending(false);
         setToast("The prompt report could not be sent. Please try again.");
-        setTimeout(() => setToast(""), 3000);
         return;
       }
     }
@@ -896,7 +900,6 @@ export default function Home() {
     setReportingPromptIssue(false);
     setPromptIssueText("");
     setToast("Prompt issue submitted for review.");
-    setTimeout(() => setToast(""), 2500);
   }
 
   async function requestAccountVerification() {
@@ -1908,7 +1911,6 @@ export default function Home() {
       setSavingRecording(false);
       setUploadProgress(0);
       setToast(`Recording was not saved: ${readableError(error)}`);
-      setTimeout(() => setToast(""), 4000);
       return;
     }
     setClips((items) => [...items.filter((item) => item.promptId !== savedClip.promptId), savedClip]);
@@ -1916,7 +1918,6 @@ export default function Home() {
     setPreview(null);
     setSavingRecording(false);
     setToast("Recording accepted");
-    setTimeout(() => setToast(""), 2200);
     if (promptIndex === prompts.length - 1) setStep("review");
     else setPromptIndex((i) => i + 1);
   }
@@ -1959,7 +1960,6 @@ export default function Home() {
   function selectPrompt(index: number) {
     if (recording || savingRecording) {
       setToast("Stop or finish saving the current recording before changing prompts.");
-      setTimeout(() => setToast(""), 2500);
       return;
     }
     if (preview && !window.confirm("Discard the recording preview and open another prompt?")) return;
@@ -2453,7 +2453,7 @@ export default function Home() {
           <div><h4>Record a manual transfer</h4><label><span>Bank or OPay transfer reference</span><input value={adminPaymentReference} onChange={(event) => setAdminPaymentReference(event.target.value)} placeholder="Successful transaction reference" /></label><label className="payment-confirmation"><input type="checkbox" checked={adminPaymentSent} onChange={(event) => setAdminPaymentSent(event.target.checked)} /><span>I confirm that this money has already been sent successfully.</span></label><button className="primary" disabled={!adminPaymentDetail.accountNumber || adminPaymentReference.trim().length < 3 || !adminPaymentSent || adminPaymentLoading} onClick={() => void markSelectedParticipantPaid()}>{adminPaymentLoading ? "Saving..." : "Mark as paid"}</button></div>
         </div>
       </aside>}
-      {toast && <div className="toast">✓ {toast}</div>}
+      {toast && <div className="toast" role="status" aria-live="polite"><span>{toast}</span><button type="button" aria-label="Dismiss notification" onClick={() => setToast("")}>×</button></div>}
       <footer><span>NaijaVision Research Infrastructure</span><span>Open multilingual contribution platform</span></footer>
     </main>
   );

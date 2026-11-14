@@ -93,3 +93,5 @@
 @media(min-width:1001px){.review-media-layout{grid-template-columns:minmax(0,1fr) minmax(460px,.85fr);max-height:calc(100vh - 100px);overflow:hidden}.review-media-layout>.data-card{min-width:0;max-height:calc(100vh - 100px);display:flex;flex-direction:column;overflow:hidden}.review-media-layout>.data-card>.table-wrap{min-height:0;overflow:auto}.review-side-column{max-height:calc(100vh - 100px);overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}.review-side-column .reviewer-media{grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr)}}
 
 .assignment-row label{display:grid;gap:6px;min-width:0;flex:1}.assignment-row label>span{font-size:12px;font-weight:700}.assignment-row select{width:100%;min-width:0}.assignment-row label small{font-size:11px;color:var(--muted)}
+
+.toast{display:flex;align-items:center;gap:14px;max-width:min(560px,calc(100vw - 32px));box-sizing:border-box}.toast button{flex-shrink:0;background:transparent;color:inherit;border:0;font-size:22px;line-height:1;cursor:pointer;padding:4px}.toast button:focus-visible{outline:2px solid currentColor;outline-offset:2px}
