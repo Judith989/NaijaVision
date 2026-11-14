@@ -4,11 +4,14 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getCurrentRole, getSupabase } from "../lib/supabase";
+import { removeLocalRecordingCopies } from "../lib/localRecordingCleanup";
 import { groupReturnedFeedback } from "../lib/returnedFeedback";
 import { surveyLanguages } from "../lib/surveyLanguages";
 
 type Submission = { id: string; status: string; expected_recordings: number; accepted_recordings: number; compensation_amount: number | null; compensation_currency: string | null; compensation_rate: number | null; compensation_basis: string | null; completed_language_count: number; completed_standard_language_count: number; completed_safe_speech_language_count: number; created_at: string; submitted_at: string | null; reviewed_at: string | null; paid_at: string | null };
 type ReturnedReview = { recording_id: string; submission_id: string; comments: string | null; recordings: { language: string; prompt_assignments: { prompt_id: string } | null } | null };
+
+type DashboardRecording = { id: string; submission_id: string; language: string; prompt_assignments: { prompt_id: string } | null };
 
 type Notice = { id: string; type: string; title: string; message: string; read_at: string | null; created_at: string };
 type SurveyResponses = { primary?: string; homeLanguage?: string; workLanguage?: string; nativeLanguages?: string[]; dailyLanguages?: string[]; otherLanguages?: string[] };
@@ -33,7 +36,7 @@ export default function DashboardPage() {
   const [role, setRole] = useState<"participant" | "reviewer" | "admin">("participant");
   const [participantId, setParticipantId] = useState("");
   const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [recordings, setRecordings] = useState<Array<{ submission_id: string; language: string }>>([]);
+  const [recordings, setRecordings] = useState<DashboardRecording[]>([]);
   const [survey, setSurvey] = useState<SurveyResponses>({});
   const [hasConsent, setHasConsent] = useState(false);
   const [notices, setNotices] = useState<Notice[]>([]);
@@ -69,7 +72,7 @@ export default function DashboardPage() {
           supabase.from("payout_accounts").select("bank_name,account_last4,verified_at").eq("user_id", data.user.id).maybeSingle(),
           supabase.from("compensation_policies").select("amount,currency,minimum_accepted_recordings,pricing_basis").is("retired_at", null).order("effective_at", { ascending: false }).limit(1).maybeSingle(),
           supabase.from("payments").select("submission_id,amount,currency,status").eq("user_id", data.user.id),
-          supabase.from("recordings").select("submission_id,language").eq("user_id", data.user.id),
+          supabase.from("recordings").select("id,submission_id,language,prompt_assignments(prompt_id)").eq("user_id", data.user.id),
           supabase.from("reviewer_payments").select("reviewed_video_count,rate_per_video,amount,currency,status").eq("reviewer_id", data.user.id),
           supabase.rpc("get_my_manual_payout_status"),
         ]);
@@ -95,7 +98,7 @@ export default function DashboardPage() {
         setPayout(payoutResult.data || null);
         setPolicy(policyResult.data ? { ...policyResult.data, amount: Number(policyResult.data.amount) } : null);
         setPayments((paymentResult.data || []).map((item) => ({ ...item, amount: Number(item.amount) })) as Payment[]);
-        setRecordings((recordingResult.data || []) as Array<{ submission_id: string; language: string }>);
+        setRecordings((recordingResult.data || []) as unknown as DashboardRecording[]);
         setReviewerPayments((reviewerPaymentResult.data || []).map((item) => ({ ...item, rate_per_video: Number(item.rate_per_video), amount: Number(item.amount) })) as ReviewerPayment[]);
         setManualPayout((manualPayoutResult.data?.[0] || null) as typeof manualPayout);
         setLoading(false);
@@ -109,6 +112,26 @@ export default function DashboardPage() {
     window.addEventListener("focus", onFocus);
     return () => { active = false; window.clearInterval(timer); window.removeEventListener("focus", onFocus); };
   }, [router]);
+
+  async function deleteDraftRecording(submission: string, id: string) {
+    if (!window.confirm("Permanently delete this recording? You will need to record its prompt again before submitting.")) return;
+    const { error } = await getSupabase()!.rpc("delete_my_draft_recordings", { p_submission_id: submission, p_recording_id: id });
+    if (error) { window.alert(error.message); return; }
+    await removeLocalRecordingCopies([id]).catch(() => window.alert("Cloud deletion is queued, but local browser cleanup failed. Clear this site’s stored data to remove the local copy."));
+    setRecordings((items) => items.filter((item) => item.id !== id));
+  }
+
+  async function discardDraft(id: string) {
+    if (!window.confirm("Permanently delete all recordings in this unsubmitted contribution? This cannot be undone. Approval, payment and archive logs are kept.")) return;
+    const { error } = await getSupabase()!.rpc("delete_my_draft_recordings", { p_submission_id: id });
+    if (error) { window.alert(error.message); return; }
+    await removeLocalRecordingCopies(recordings.filter((item) => item.submission_id === id).map((item) => item.id)).catch(() => window.alert("Cloud deletion is queued, but local browser cleanup failed. Clear this site’s stored data to remove local copies."));
+    const draft = localStorage.getItem("naijavision-contribution-draft");
+    try { if (draft && JSON.parse(draft).submissionId === id) localStorage.removeItem("naijavision-contribution-draft"); } catch { /* An unrelated invalid draft is not part of this deletion. */ }
+    setSubmissions((items) => items.map((item) => item.id === id ? { ...item, status: "withdrawn" } : item));
+    setRecordings((items) => items.filter((item) => item.submission_id !== id));
+    window.alert("Contribution discarded. Cloud recordings are queued for permanent deletion.");
+  }
 
   async function signOut() { await getSupabase()?.auth.signOut(); router.replace("/"); }
   async function markNoticeRead(id: string) {
@@ -154,6 +177,7 @@ export default function DashboardPage() {
     <section className="dashboard-shell enhanced-dashboard">
       <div className="dashboard-hero-panel"><div><div className="eyebrow light">Private participant workspace</div><h1>Welcome back.</h1><p>Signed in as <b>{participantId}</b>. Your name and email are intentionally not displayed here.</p></div><div className="hero-next-action"><small>Recommended next step</small><Link className="dashboard-cta" href={needsLanguageSelection ? "/?contribute=1&survey=edit" : nextLabel === "View review status" ? "/dashboard#review-status" : "/?contribute=1"}>{nextLabel} <span>→</span></Link></div></div>
       {(needsLanguageSelection || requiresRedo || notices.some((item) => !item.read_at)) && <div className="action-banner"><b>Action required</b><span>{needsLanguageSelection ? "No languages are selected. Select the languages you can speak so the system can assign the correct recording exercises." : requiresRedo ? "A reviewer returned recordings for correction. Open your contribution to see what must be redone." : "You have an unread contribution update."}</span><Link href={needsLanguageSelection ? "/?contribute=1&survey=edit" : requiresRedo ? "/?contribute=1" : "#notifications"}>{needsLanguageSelection ? "Select languages" : "Review now"}</Link></div>}
+      <section className="dashboard-card" aria-label="Recording storage and deletion"><h2>Recording storage</h2><p>You can delete recordings before submitting, or discard an unsubmitted contribution below. Recordings under review or returned for correction must remain available for review.</p><p>Recordings in finally rejected submissions are permanently deleted after 30 days. Approved recordings are removed from cloud storage only after a verified archive has been saved. Approval, payment and archive logs are kept.</p>{submissions.filter((item) => ["draft", "recording", "uploading"].includes(item.status) && !item.submitted_at).map((item) => <div key={item.id}><p><Link href={`/?contribute=1&submission=${item.id}`}>Manage recordings in {item.id.slice(0, 8)}</Link>{" "}<button className="download danger" onClick={() => void discardDraft(item.id)}>Discard unsubmitted contribution</button></p>{recordings.filter((recording) => recording.submission_id === item.id).map((recording) => <p key={recording.id}><span>{recording.prompt_assignments?.prompt_id || recording.id.slice(0, 8)} · {recording.language}</span>{" "}<button className="download danger" onClick={() => void deleteDraftRecording(item.id, recording.id)}>Delete recording</button></p>)}</div>)}</section>
       {refreshError && <p role="alert" className="action-banner">{refreshError}</p>}
       {returnedSubmissions.map((submission) => <section className="dashboard-card" key={submission.id} aria-label="Recordings returned for correction"><div className="card-heading"><div><small>Action required: returned to you</small><h2>Recordings returned for correction</h2><p>Submission {submission.id.slice(0, 8)}. Replace only the marked clips, then resubmit. Your other recordings remain saved.</p></div></div>{returnedReviews.filter((review) => review.submission_id === submission.id).map((review) => <article className="participant-redo-comment" key={review.recording_id}><b>{review.recordings?.prompt_assignments?.prompt_id || "Returned recording"} · {review.recordings?.language}</b><p>{review.comments || "Please record this clip again. See your return notification for instructions."}</p></article>)}<Link className="primary" href={`/?contribute=1&submission=${submission.id}`}>View feedback and redo recordings</Link></section>)}
       <div className="dashboard-metrics"><div><small>Participant ID</small><b>{participantId}</b><em>Pseudonymous research identity</em></div><div><small>Recording target</small><b>{completed} of {target}</b><em>{estimatedMinutes} minutes estimated</em></div><div><small>Approved submissions</small><b>{approved}</b><em>{submissions.length} total submissions</em></div><div><small>Latest status</small><b>{humanStatus(latest?.status)}</b><em>{latest?.created_at ? new Date(latest.created_at).toLocaleDateString() : "No contribution yet"}</em></div></div>

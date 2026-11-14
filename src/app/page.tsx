@@ -30,7 +30,7 @@ type Clip = {
 type RecordingJoinRow = {
   id: string;
   object_path: string;
-  archived_at?: string | null;
+  storage_deletion_reason?: string | null; archived_at?: string | null;
   archive_path?: string | null;
   storage_deleted_at?: string | null;
   duration_seconds: number;
@@ -264,7 +264,7 @@ export default function Home() {
   const [reviewerMessageSending, setReviewerMessageSending] = useState(false);
   const [adminDecisionComments, setAdminDecisionComments] = useState("");
   const [adminWorkspaceView, setAdminWorkspaceView] = useState<"reviews" | "operations" | "assignments">("reviews");
-  const [reviewerRecords, setReviewerRecords] = useState<Array<{ id: string; prompt_id: string; original_transcript: string; language: string; duration_seconds: number; quality_status: string; object_path: string; signed_url: string; archived_at?: string | null; archive_path?: string | null; storage_deleted_at?: string | null; review_decision?: "approved" | "rejected" | "changes_requested"; review_comment?: string }>>([]);
+  const [reviewerRecords, setReviewerRecords] = useState<Array<{ id: string; prompt_id: string; original_transcript: string; language: string; duration_seconds: number; quality_status: string; object_path: string; signed_url: string; storage_deletion_reason?: string | null; archived_at?: string | null; archive_path?: string | null; storage_deleted_at?: string | null; review_decision?: "approved" | "rejected" | "changes_requested"; review_comment?: string }>>([]);
   const [reviewerPayments, setReviewerPayments] = useState<ReviewerPaymentRow[]>([]);
   const [reviewerRate, setReviewerRate] = useState({ amount: 20, currency: "NGN" });
   const [reviewerPayout, setReviewerPayout] = useState<{ bank_name: string; account_last4: string; verified_at: string | null } | null>(null);
@@ -352,10 +352,10 @@ export default function Home() {
           setStep("welcome");
           return;
         }
-        const resumableStatuses = ["draft", "recording", "uploading", "changes_requested", "resubmitted"];
+        const resumableStatuses = ["draft", "recording", "uploading", "changes_requested"];
         const activeSubmission = latestSubmission && resumableStatuses.includes(latestSubmission.status) ? latestSubmission : null;
         if (latestSubmission) setEarnedCompensation({ amount: Number(latestSubmission.compensation_amount || 0), currency: latestSubmission.compensation_currency || "NGN", completedLanguages: Number(latestSubmission.completed_language_count || 0), standardLanguages: Number(latestSubmission.completed_standard_language_count || 0), safeSpeechLanguages: Number(latestSubmission.completed_safe_speech_language_count || 0) });
-        const awaitingDecisionStatuses = ["submitted", "automated_qc", "awaiting_review", "payment_eligible", "payment_processing"];
+        const awaitingDecisionStatuses = ["resubmitted", "submitted", "automated_qc", "awaiting_review", "payment_eligible", "payment_processing"];
         // Payment and survey settings must remain reachable while a completed
         // submission is under review. Only ordinary contribution attempts are
         // redirected to the review-status dashboard.
@@ -420,6 +420,7 @@ export default function Home() {
               }
             } else {
               setSubmissionId(newSubmissionId);
+              setBackendSubmissionStatus("recording");
               setPromptIndex(0);
               openCalibration("record");
             }
@@ -500,7 +501,7 @@ export default function Home() {
     const supabase = getSupabase();
     if (!supabase) return;
     supabase.from("recordings")
-      .select("id,language,duration_seconds,quality_status,object_path,original_transcript,archived_at,archive_path,storage_deleted_at,prompt_assignments(prompt_id)")
+      .select("id,language,duration_seconds,quality_status,object_path,original_transcript,archived_at,archive_path,storage_deleted_at,storage_deletion_reason,prompt_assignments(prompt_id)")
       .eq("submission_id", selectedReviewId)
       .then(async ({ data }) => {
         const rows = data || [];
@@ -533,6 +534,7 @@ export default function Home() {
             archived_at: row.archived_at,
             archive_path: row.archive_path,
             storage_deleted_at: row.storage_deleted_at,
+            storage_deletion_reason: row.storage_deletion_reason,
             review_decision: decisionByRecording.get(row.id),
             review_comment: commentByRecording.get(row.id),
           };
@@ -710,6 +712,7 @@ export default function Home() {
   }
 
   async function hydrateSubmissionRecordings(activeId: string, status: string, sessionCode: string) {
+    setBackendSubmissionStatus(status);
     const supabase = getSupabase();
     if (!supabase) return;
     const { data: rows, error } = await supabase
@@ -854,9 +857,8 @@ export default function Home() {
   async function removeAcceptedClip(clip: Clip) {
     const supabase = getSupabase();
     if (supabase && clip.backendRecordingId) {
-      const { error } = await supabase.from("recordings").delete().eq("id", clip.backendRecordingId);
+      const { error } = await supabase.rpc("delete_my_draft_recordings", { p_submission_id: submissionId, p_recording_id: clip.backendRecordingId });
       if (error) throw error;
-      if (clip.objectPath) await supabase.storage.from("raw-recordings").remove([clip.objectPath]);
     }
     await deleteClip(clip.id);
     setClips((items) => items.filter((item) => item.id !== clip.id));
@@ -1093,6 +1095,7 @@ export default function Home() {
       return;
     }
     setSubmissionId(data);
+    setBackendSubmissionStatus("recording");
     setPromptIndex(0);
     openCalibration("profile");
   }
@@ -2344,7 +2347,7 @@ export default function Home() {
           <div className="section-head"><div><div className="eyebrow">Review your recordings</div><h2>{redoPromptIds ? "Check your replacement before resubmitting." : "Check before you submit."}</h2><p>{redoPromptIds ? `Only ${prompts.length === 1 ? "this returned recording" : `these ${prompts.length} returned recordings`} will be replaced. Every other video from your original submission remains saved.` : "Accepted clips are saved securely as you go. Play any clip, remove a problem recording, or return to recording. Final submission sends the complete contribution to a human reviewer."}</p></div><span className="time-pill">{clips.length} clip{clips.length === 1 ? "" : "s"}</span></div>
           <div className="participant-review">
             <div className="review-list">
-              {clips.map((clip, index) => <div className="review-row" key={clip.id}><span>{index + 1}</span><div><b>{clip.promptId} · {clip.language}</b><small>{clip.transcript}</small></div><em>{clip.duration.toFixed(1)}s</em><button className="download" onClick={() => void playSavedRecording(clip)}>Play</button><button className="download" onClick={() => void downloadSavedRecording(clip)}>Download</button><button className="download danger" onClick={async () => { if (!window.confirm(`Remove recording ${clip.promptId}? You will need to record this prompt again before submitting.`)) return; try { await removeAcceptedClip(clip); } catch { setToast("The recording could not be removed. Please try again."); return; } if (reviewMedia) { URL.revokeObjectURL(reviewMedia); setReviewMedia(""); } }}>Remove</button></div>)}
+              {clips.map((clip, index) => <div className="review-row" key={clip.id}><span>{index + 1}</span><div><b>{clip.promptId} · {clip.language}</b><small>{clip.transcript}</small></div><em>{clip.duration.toFixed(1)}s</em><button className="download" onClick={() => void playSavedRecording(clip)}>Play</button><button className="download" onClick={() => void downloadSavedRecording(clip)}>Download</button><button className="download danger" disabled={backendConfigured && !["draft", "recording", "uploading"].includes(backendSubmissionStatus)} title="Only unsubmitted recordings can be deleted. Returned recordings must be replaced." onClick={async () => { if (!window.confirm(`Permanently delete recording ${clip.promptId}? You will need to record this prompt again before submitting.`)) return; try { await removeAcceptedClip(clip); } catch { setToast("The recording could not be removed. Please try again."); return; } if (reviewMedia) { URL.revokeObjectURL(reviewMedia); setReviewMedia(""); } }}>Remove</button></div>)}
             </div>
             <aside className="review-player">{reviewMedia ? <video src={reviewMedia} controls autoPlay playsInline /> : <div><Mark>▶</Mark><p>Select a recording to play it here.</p></div>}<div className="submission-check"><b>Submission includes</b><small>Consent record, participant survey, {clips.length} recordings, calibration metrics, and recording metadata.</small></div></aside>
           </div>
@@ -2413,7 +2416,7 @@ export default function Home() {
               <button className="download danger" disabled={!canEditReview} onClick={() => setBulkReviewDraft({ decision: "rejected", comments: "" })}>Decline all</button>
               <button className="download redo" disabled={!canEditReview} onClick={() => setBulkReviewDraft({ decision: "changes_requested", comments: "" })}>Redo all</button>
             </div>}
-            <div className="table-wrap"><table><thead><tr><th>Prompt</th><th>Language</th><th>Type</th><th>Duration</th><th>Quality</th><th>Media</th><th>Decision</th></tr></thead><tbody>{backendConfigured ? reviewerRecords.map((record) => <tr key={record.id} className={record.id === selectedReviewRecordingId ? "active-recording-row" : ""}><td><b>{record.prompt_id}</b>{record.storage_deleted_at && <small>Archived locally</small>}</td><td>{record.language}</td><td>{[...corePrompts, ...safeSpeechPrompts].find((prompt) => prompt.id === record.prompt_id)?.type}</td><td>{Number(record.duration_seconds).toFixed(1)}s</td><td><span className={`status ${record.storage_deleted_at ? "accepted" : record.review_decision || "needs-review"}`}>{record.storage_deleted_at ? "archived" : record.review_decision?.replaceAll("_", " ") || record.quality_status}</span></td><td>{record.storage_deleted_at ? <span className="status accepted" title={record.archive_path || "Stored in the verified local archive"}>Archived locally</span> : <button className="download" disabled={!record.signed_url} onClick={() => { setSelectedReviewRecordingId(record.id); setReviewMedia(record.signed_url); }}>Watch</button>}</td><td><div className="recording-decisions"><button className={`download ${record.review_decision === "approved" ? "selected" : ""}`} disabled={!canEditReview || Boolean(record.storage_deleted_at)} onClick={() => reviewRecording(record.id, "approved")}>Approve</button><button className={`download danger ${record.review_decision === "rejected" ? "selected" : ""}`} disabled={!canEditReview || Boolean(record.storage_deleted_at)} onClick={() => reviewRecording(record.id, "rejected")}>Decline</button><button className={`download redo ${record.review_decision === "changes_requested" ? "selected" : ""}`} disabled={!canEditReview || Boolean(record.storage_deleted_at)} onClick={() => reviewRecording(record.id, "changes_requested")}>Redo</button></div></td></tr>) : clips.map((clip) => { const decision = localRecordingReviews[clip.id]; return <tr key={clip.id} className={clip.id === selectedReviewRecordingId ? "active-recording-row" : ""}><td><b>{clip.promptId}</b><small>{clip.transcript}</small></td><td>{clip.language}</td><td>{prompts.find((prompt) => prompt.id === clip.promptId)?.type}</td><td>{clip.duration.toFixed(1)}s</td><td><span className={`status ${decision || clip.status}`}>{decision === "approved" ? "approved" : decision === "rejected" ? "declined" : decision === "changes_requested" ? "redo requested" : clip.status}</span></td><td><button className="download" onClick={() => { if (reviewMedia) URL.revokeObjectURL(reviewMedia); setSelectedReviewRecordingId(clip.id); setReviewMedia(URL.createObjectURL(clip.blob)); }}>Watch</button></td><td><div className="recording-decisions"><button className="download" onClick={() => reviewRecording(clip.id, "approved")}>Approve</button><button className="download danger" onClick={() => reviewRecording(clip.id, "rejected")}>Decline</button><button className="download redo" onClick={() => reviewRecording(clip.id, "changes_requested")}>Redo</button></div></td></tr>; })}</tbody></table></div>
+            <div className="table-wrap"><table><thead><tr><th>Prompt</th><th>Language</th><th>Type</th><th>Duration</th><th>Quality</th><th>Media</th><th>Decision</th></tr></thead><tbody>{backendConfigured ? reviewerRecords.map((record) => <tr key={record.id} className={record.id === selectedReviewRecordingId ? "active-recording-row" : ""}><td><b>{record.prompt_id}</b>{record.storage_deleted_at && <small>{record.storage_deletion_reason ? "Deleted after retention period" : "Archived locally"}</small>}</td><td>{record.language}</td><td>{[...corePrompts, ...safeSpeechPrompts].find((prompt) => prompt.id === record.prompt_id)?.type}</td><td>{Number(record.duration_seconds).toFixed(1)}s</td><td><span className={`status ${record.storage_deleted_at ? "accepted" : record.review_decision || "needs-review"}`}>{record.storage_deleted_at ? (record.storage_deletion_reason ? "deleted" : "archived") : record.review_decision?.replaceAll("_", " ") || record.quality_status}</span></td><td>{record.storage_deleted_at ? <span className="status accepted" title={record.archive_path || record.storage_deletion_reason || "Stored in the verified local archive"}>{record.storage_deletion_reason ? "Deleted after retention period" : "Archived locally"}</span> : <button className="download" disabled={!record.signed_url} onClick={() => { setSelectedReviewRecordingId(record.id); setReviewMedia(record.signed_url); }}>Watch</button>}</td><td><div className="recording-decisions"><button className={`download ${record.review_decision === "approved" ? "selected" : ""}`} disabled={!canEditReview || Boolean(record.storage_deleted_at)} onClick={() => reviewRecording(record.id, "approved")}>Approve</button><button className={`download danger ${record.review_decision === "rejected" ? "selected" : ""}`} disabled={!canEditReview || Boolean(record.storage_deleted_at)} onClick={() => reviewRecording(record.id, "rejected")}>Decline</button><button className={`download redo ${record.review_decision === "changes_requested" ? "selected" : ""}`} disabled={!canEditReview || Boolean(record.storage_deleted_at)} onClick={() => reviewRecording(record.id, "changes_requested")}>Redo</button></div></td></tr>) : clips.map((clip) => { const decision = localRecordingReviews[clip.id]; return <tr key={clip.id} className={clip.id === selectedReviewRecordingId ? "active-recording-row" : ""}><td><b>{clip.promptId}</b><small>{clip.transcript}</small></td><td>{clip.language}</td><td>{prompts.find((prompt) => prompt.id === clip.promptId)?.type}</td><td>{clip.duration.toFixed(1)}s</td><td><span className={`status ${decision || clip.status}`}>{decision === "approved" ? "approved" : decision === "rejected" ? "declined" : decision === "changes_requested" ? "redo requested" : clip.status}</span></td><td><button className="download" onClick={() => { if (reviewMedia) URL.revokeObjectURL(reviewMedia); setSelectedReviewRecordingId(clip.id); setReviewMedia(URL.createObjectURL(clip.blob)); }}>Watch</button></td><td><div className="recording-decisions"><button className="download" onClick={() => reviewRecording(clip.id, "approved")}>Approve</button><button className="download danger" onClick={() => reviewRecording(clip.id, "rejected")}>Decline</button><button className="download redo" onClick={() => reviewRecording(clip.id, "changes_requested")}>Redo</button></div></td></tr>; })}</tbody></table></div>
           </div>
           <div className="review-side-column">
           <aside className="reviewer-media"><div className="reviewer-media-heading"><b>Video preview</b><small>{selectedReviewRecording ? `${selectedReviewRecording.prompt_id} | ${selectedReviewRecording.language}` : "Select Watch beside any recording"}</small></div>{reviewMedia ? <video src={reviewMedia} controls autoPlay playsInline /> : <div className="reviewer-media-empty">No video selected</div>}{selectedReviewRecording && <div className="expected-script"><span>Expected script</span><p>{selectedReviewRecording.original_transcript || selectedExpectedPrompt?.text || "No expected script was saved for this recording."}</p>{selectedExpectedPrompt?.translation && <><span>English translation</span><p>{selectedExpectedPrompt.translation}</p></>}<small>Compare the spoken audio and visible lip movement with this assigned text before choosing Approve, Decline, or Redo.</small>{selectedReviewRecording.review_comment && !recordingReviewDraft && <div className="saved-clip-comment"><b>Saved reviewer comment</b><p>{selectedReviewRecording.review_comment}</p></div>}</div>}{recordingReviewDraft && <div className="clip-comment-editor"><b>{recordingReviewDraft.decision === "rejected" ? "Why is this video declined?" : "What should the participant improve?"}</b><small>This comment is saved with this video and shown to the participant if it is returned.</small><textarea autoFocus value={recordingReviewDraft.comments} onChange={(event) => setRecordingReviewDraft({ ...recordingReviewDraft, comments: event.target.value })} placeholder="For example: The lips moved out of frame. Please keep your mouth centred and repeat the full sentence." /><div><button className="download" onClick={() => setRecordingReviewDraft(null)}>Cancel</button><button className="primary" disabled={recordingReviewDraft.comments.trim().length < 10} onClick={() => reviewRecording(recordingReviewDraft.recordingId, recordingReviewDraft.decision, recordingReviewDraft.comments)}>Save {recordingReviewDraft.decision === "rejected" ? "decline" : "redo request"}</button></div></div>}</aside>

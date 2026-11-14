@@ -50,3 +50,7 @@ verify_jwt = true
 # Authenticated by a server-only x-notification-secret, never a browser token.
 [functions.send-notification-emails]
 verify_jwt = false
+
+# Server-only secret, shared with the existing scheduled notification worker.
+[functions.cleanup-recordings]
+verify_jwt = false
