@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { TaskReminders } from "./TaskReminders";
 import { backendConfigured, getSupabase } from "./lib/supabase";
 
 import { surveyLanguages } from "./lib/surveyLanguages";
@@ -452,7 +453,7 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
     </>}
   </section>;
 
-  if (assignmentsOnly) return <section className="admin-operations">{message && <p role="status" className="auth-message">{message}</p>}{assignmentPanel}</section>;
+  if (assignmentsOnly) return <section className="admin-operations">{message && <p role="status" className="auth-message">{message}</p>}{assignmentPanel}<TaskReminders /></section>;
 
   if (reviewerPaymentsOnly) return <section className="admin-operations approval-reviewer-payments" aria-labelledby="reviewer-payment-queue-heading">
     {message && <p role="status" className="auth-message">{message}</p>}
@@ -469,6 +470,7 @@ export function AdminOperations({ assignmentsOnly = false, reviewerPaymentsOnly 
   </section>;
 
   return <section className="admin-operations" id="staff-management">
+    <TaskReminders />
     <div className="section-head"><div><div className="eyebrow">Administrator controls</div><h2>Operations and governance</h2></div></div>
     {message && <p className="auth-message">{message}</p>}
     <div className="metric-grid"><div><span>Reviewers</span><b>{staffMembers.filter((member) => member.role === "reviewer").length}</b><small>Active reviewer accounts</small></div><div><span>Pending reviews</span><b>{pendingSubmissions.length}</b><small>Submissions requiring assignment or action</small></div><div><span>Total still to pay</span><b>₦{totalToPay.toLocaleString()}</b><small>Eligible and failed payments</small></div><div><span>Processing</span><b>₦{totalProcessing.toLocaleString()}</b><small>Transfers currently in progress</small></div><div><span>Total paid</span><b>₦{totalPaid.toLocaleString()}</b><small>Participant and reviewer payments</small></div></div>

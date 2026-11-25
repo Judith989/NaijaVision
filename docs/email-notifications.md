@@ -42,3 +42,13 @@ Pause sending with `select cron.unschedule('naijavision-notification-emails');`.
 `node --test tests/notification-email.test.mjs tests/notification-queue.test.mjs` tests privacy, SMTP error handling, transactional queueing, event recipients, leases, rate limits and permissions against embedded PostgreSQL. `npx deno check --no-lock --node-modules-dir=none supabase/functions/send-notification-emails/index.ts` checks the deployed worker type/import graph.
 
 References: https://supabase.com/docs/guides/functions/schedule-functions and https://nodemailer.com/smtp.
+
+## Admin task reminders
+
+Apply `supabase/migrations/202611250001_task_reminders.sql` before deploying the reminder UI. In Administrator controls or Reviewer assignments, open Pending task reminders, choose a category, preview recipients, select people, then Send reminders.
+
+Categories: no contribution started (including empty drafts), unfinished recordings, participant corrections, returned reviewer work, and pending reviewer work. Accounts must be active and email verified. Tasks must be at least 24 hours old; completed current recommendations awaiting administrator action are excluded. Historical paid, rejected, and withdrawn submissions are not reminder tasks. A previous completed contribution alone does not invite further participation.
+
+Sending rechecks eligibility on the server and serializes admin requests. Each recipient is limited to one task reminder in 24 hours across all categories. Batches accept at most 200 selected IDs. Dashboard notifications, the existing email queue, reminder logs, and audit events are committed together. The UI reports queued reminders, not confirmed email delivery. No scheduled mass reminders are enabled, and deployment sends no messages.
+
+Validation: `node --test tests/task-reminders.test.mjs` covers permissions, verified/active accounts, current versus stale recommendations, changed eligibility, duplicate recipient IDs, and the cooldown.
